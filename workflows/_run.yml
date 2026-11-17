@@ -1,0 +1,94 @@
+name: _run (службове — викликається з інших, сам не запускати)
+on:
+  workflow_call:
+    inputs:
+      page: { type: string, default: "" }
+      mode: { type: string, default: "" }
+      preview: { type: string, default: "" }
+      report: { type: string, default: "" }
+      stress: { type: string, default: "" }
+      source: { type: string, default: "" }
+      old: { type: string, default: "" }
+      age: { type: string, default: "" }
+      limit: { type: string, default: "" }
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v6
+      # ПРИВАТНІ дані (business, prompt, settings, state, replies, clicks) лежать в окремому приватному репо coments-data
+      - uses: actions/checkout@v6
+        with:
+          repository: belugachel-web/coments-data
+          token: ${{ secrets.DATA_SECRET_TOKEN }}
+          path: data
+      - name: Підтягнути дані
+        run: rsync -a --exclude=.git data/ ./
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Бот
+        id: bot
+        env:
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          FB_PAGE_ACCESS_TOKEN_STRYI: ${{ secrets.FB_PAGE_ACCESS_TOKEN_STRYI }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PAGE: ${{ inputs.page }}
+          MODE: ${{ inputs.mode }}
+          PREVIEW: ${{ inputs.preview }}
+          REPORT: ${{ inputs.report }}
+          STRESS: ${{ inputs.stress }}
+          SOURCE: ${{ inputs.source }}
+          OLD: ${{ inputs.old }}
+          AGE: ${{ inputs.age }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          # tg_event (там текст чернетки з коментарем) беремо з файлу події, а не з env: env друкується в публічному логу
+          export TG_EVENT="$(jq -r '.inputs.tg_event // ""' "$GITHUB_EVENT_PATH")"
+          python bot.py
+      - name: Зберегти стан
+        if: always()
+        run: |
+          mkdir -p clicks
+          cp -f state.json replies.md data/ 2>/dev/null || true
+          rm -rf data/clicks && cp -r clicks data/clicks
+          cd data
+          git config user.name bot && git config user.email bot@users.noreply.github.com
+          git add -A state.json replies.md clicks
+          if ! git diff --cached --quiet; then
+            git commit -q -m "state"
+            for i in 1 2 3 4 5 6; do
+              git pull --rebase -q -X theirs && git push -q && exit 0
+              git rebase --abort 2>/dev/null || true
+              sleep $((RANDOM % 5 + 2))
+            done
+            exit 1
+          fi
+      - name: Наступний запуск (ланцюжок, якщо ще лишилась робота)
+        if: success() && steps.bot.outputs.more == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAGE: ${{ inputs.page }}
+          MODE: ${{ inputs.mode }}
+          AGE: ${{ inputs.age }}
+          LIMIT_NEXT: ${{ steps.bot.outputs.limit }}
+        run: |
+          EVJ="$(jq -r '.inputs.tg_event // ""' "$GITHUB_EVENT_PATH")"; [ -z "$EVJ" ] && EVJ='{}'
+          N=$(echo "$EVJ" | jq -r '.chain // 0')
+          if [ "$N" -ge 15 ]; then echo "Ланцюжок: досягнуто 15 запусків, зупиняюсь"; exit 0; fi
+          NEW=$(jq -nc --arg page "$PAGE" --arg mode "$MODE" --arg age "$AGE" --arg limit "$LIMIT_NEXT" --argjson chain "$((N + 1))" '{type:"run",page:$page,mode:$mode,age:$age,limit:$limit,chain:$chain}')
+          gh workflow run service.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f tg_event="$NEW"
+      - name: Сповістити про аварію
+        if: failure()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -s "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" -d chat_id="${TG_CHAT}" \
+            --data-urlencode "text=🚨 Бот впав. Дивись: ${RUN_URL}" > /dev/null

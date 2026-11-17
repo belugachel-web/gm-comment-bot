@@ -1,0 +1,47 @@
+name: comment-bot
+on:
+  workflow_dispatch:
+    inputs:
+      page:
+        description: "Сторінка"
+        type: choice
+        options: [всі, nardy, stryi]
+        default: всі
+      mode:
+        description: "Режим: draft = чернетки вам у Telegram (безпечно); auto = бот публікує сам"
+        type: choice
+        options: [draft, auto]
+        default: draft
+      preview:
+        description: "Перегляд: бот лише ПОКАЗУЄ N відповідей у Telegram, нічого не публікує"
+        type: choice
+        options: [без перегляду, "10", "50"]
+        default: без перегляду
+      age:
+        description: "Наскільки старі коментарі брати (в днях)"
+        type: choice
+        options: [як у налаштуваннях (30), усі, "7", "30", "365"]
+        default: як у налаштуваннях (30)
+      limit:
+        description: "Скільки коментарів обробити всього (число; порожньо = усі)"
+        type: string
+        default: ""
+# ЩОГОДИННУ перевірку ВИМКНЕНО на час тестів (29.10). Щоб увімкнути — прибрати # перед двома рядками нижче
+  # schedule:
+  #   - cron: "17 * * * *"   # щогодини о :17 (на :00 GitHub затримує запуски); поля порожні → режим із settings.json
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: bot
+  cancel-in-progress: false
+jobs:
+  run:
+    uses: ./.github/workflows/_run.yml
+    secrets: inherit
+    with:
+      page: ${{ (inputs.page == 'nardy' || inputs.page == 'stryi') && inputs.page || '' }}
+      mode: ${{ inputs.mode }}
+      preview: ${{ (inputs.preview == '10' || inputs.preview == '50') && inputs.preview || '' }}
+      age: ${{ (inputs.age == 'усі' && 'all') || ((inputs.age == '7' || inputs.age == '30' || inputs.age == '365') && inputs.age) || '' }}
+      limit: ${{ inputs.limit }}
