@@ -1,0 +1,16 @@
+# Приватні дані: живуть у приватному репо coments-data, у цьому репо їх бути НЕ повинно
+data/
+state.json
+replies.md
+settings.json
+prompt.md
+business*.md
+mock_comments.json
+clicks/
+HANDOFF*.md
+REVIEW.md
+ПИТАННЯ_МАМІ.md
+gemini-10302026/
+_old_delete/
+__pycache__/
+.pytest_cache/
