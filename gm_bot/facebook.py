@@ -115,7 +115,7 @@ class Facebook:
                 if e.code != 100:
                     raise
                 bad, last = bad + 1, e  # один пост Facebook не дає прочитати (інший тип/автор посту): пропускаємо
-                print(f"Facebook: пост {x} пропущено: {e}")
+                print(f"Facebook: пост {x} пропущено (FB 100, недоступний для читання)")
                 continue
             out += self._post_items(p, now, include_answered)
         if bad and bad == len(ids):

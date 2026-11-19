@@ -71,11 +71,38 @@ def reply_style(reply):
 
 FOREIGN_MARKET = re.compile(r"woodcarving-tools\.com|(?:^|/)(?:en|pl|de|fr|es|it|pt)(?:/|$)", re.I)
 
+# Країна перебиває мову (20.11, випадок Марокко): якщо в коментарі названа ІНША країна (не Україна), міжнародне посилання
+# для укр/рос тексту допустиме. Стеми без закінчень, щоб не ловити «англійська», «німецька» тощо.
+_COUNTRIES = (
+    # укр/рос
+    r"марокк|німеччин|германи[июяе]|польщ|польш|сша|оае|америка|америц|канад|англі[їяю]|англи[июя]|британі|британи|франці[їяю]|франци[июя]|італі[їяю]|итали[июя]|"
+    r"іспані[їяю]|испани[июя]|туреччин|турци[июя]|ізраїл|израил|казахстан|грузі[їяю]|грузи[июя]|молдов|литв|латві[їяю]|латви[июя]|естон|чехі[їяю]|чехи[июя]|"
+    r"словаччин|словаки|румуні|румыни|болгарі|болгари|угорщин|венгри|австрі[їяю]|австри[июя]|швейцар|нідерланд|голланд|бельгі[їяю]|бельги[июя]|"
+    r"ірланд|швеці[їяю]|швеци[июя]|норвег|фінлянд|финлянд|португал|греці[їяю]|греци[июя]|австрал|японі[їяю]|япони[июя]|китай|бразил|мексик|"
+    r"єгипет|египет|алжир|туніс|тунис|сауд|катар|дубай|дубаї|аргентин|чилі|колумб|нігері|нигери|кені|кени|"
+    # англ
+    r"morocco|germany|poland|usa(?!\w)|u\.s\.a?\.?|united states|america|uae(?!\w)|emirates|dubai|canada|england|\buk\b|britain|united kingdom|france|italy|spain|turkey|türkiye|"
+    r"israel|australia|japan|china|korea|brazil|mexico|egypt|algeria|tunisia|saudi|qatar|kuwait|india|pakistan|netherlands|belgium|ireland|sweden|norway|finland|denmark|"
+    r"portugal|greece|austria|switzerland|czech|slovakia|romania|bulgaria|hungary|lithuania|latvia|estonia|moldova|kazakhstan|nigeria|kenya|south africa|philippines|"
+    r"indonesia|malaysia|thailand|vietnam|singapore|new zealand|argentina|chile|colombia|peru|cuba|"
+    # інші мови
+    r"marruecos|alemania|polonia|estados unidos|españa|francia|italia|turquía|méxico|maroko|niemcy|polsk|marokko|deutschland|maroc|allemagne|"
+    r"المغرب|مصر|السعودية|الإمارات|الجزائر|تونس|قطر|الكويت|الأردن|لبنان|العراق|ليبيا"
+)
+FOREIGN_COUNTRY = re.compile(r"(?<!\w)(?:" + _COUNTRIES + r")", re.I)
+
+
+def mentions_foreign_country(comment):
+    return bool(FOREIGN_COUNTRY.search(comment))
+
 
 def reply_market(comment, reply, allowed=()):
-    """Кириличний (укр/рос) коментар → посилання українського сайту, а не міжнародного/іншомовного.
+    """Кириличний (укр/рос) коментар → посилання українського сайту, а не міжнародного/іншомовного,
+    ХІБА що в коментарі названа інша країна (країна перебиває мову).
     Посилання, яке власник вказав у дописі (allowed), дозволене завжди."""
     if len(CYR.findall(comment)) <= len(LAT.findall(comment)):
+        return None
+    if mentions_foreign_country(comment):
         return None
     ok = {_norm_url(u) for u in allowed}
     for u in URL_RE.findall(reply):
