@@ -55,7 +55,8 @@ class Facebook:
         except Exception:
             e = {}
         # URL з токеном ніколи не потрапляє в лог: показуємо лише код і текст помилки
-        raise FBError(e.get("code", r.status_code), str(e.get("message", r.text))[:200])
+        raise FBError(e.get("code", r.status_code), str(e.get("message", r.text))[:400] +
+                      f" [subcode={e.get('error_subcode')}, запит={r.request.url.path}]")
 
     def _get(self, url, params=None):
         for attempt in range(3):
@@ -113,6 +114,24 @@ class Facebook:
         return out
 
     def comments(self, include_answered=False):
+        try:
+            return self._comments(include_answered)
+        except FBError as e:
+            if e.kind == "token":
+                self._diagnose(e)
+            raise
+
+    def _diagnose(self, e):
+        """При помилці токена пояснює, чи це токен саме цієї сторінки (запит /me для токена сторінки повертає саму сторінку)."""
+        try:
+            me = self._get(f"{self.base}/me", {"fields": "id,name", "access_token": self.token})
+        except FBError:
+            return
+        if str(me.get("id")) != str(self.pid):
+            raise FBError(e.code, f"ТОКЕН НЕ СТОРІНКИ: це токен «{me.get('name')}» ({me.get('id')}), а потрібен токен сторінки {self.pid}") from None
+        raise FBError(e.code, f"токен сторінки {self.pid} правильний, але бракує прав у застосунку Meta: {e.msg}") from None
+
+    def _comments(self, include_answered=False):
         """Швидке читання: легкий список усіх постів (id, дата, кількість коментарів), потім повністю читаємо лише
         свіжі пости (не старші за вік коментарів + запас) і старі пости, де кількість коментарів змінилась з минулого разу."""
         now = dt.datetime.now(dt.timezone.utc)
