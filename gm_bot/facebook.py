@@ -19,6 +19,8 @@ class FBError(Exception):
 
     @property
     def kind(self):
+        if self.code == 10 or 200 <= self.code <= 299 or (self.code == 100 and "endpoint requires" in self.msg.lower()):
+            return "token"  # токену бракує дозволу (напр. pages_read_engagement): потрібен новий токен сторінки
         return "token" if self.code in TOKEN_CODES else "limit" if self.code in LIMIT_CODES else "comment"
 
 
@@ -103,19 +105,11 @@ class Facebook:
         return out
 
     def _read_posts(self, ids, now, include_answered):
-        """Повне читання постів пачками (один запит на кілька постів). Якщо Facebook скаржиться на обсяг — по одному."""
+        """Повне читання постів по одному (параметр ids застарілий з Graph v26.0)."""
         out = []
-        for i in range(0, len(ids), 10):
-            chunk = ids[i:i + 10]
-            try:
-                got = self._get(f"{self.base}/", {"ids": ",".join(chunk), "fields": self.FIELDS, "access_token": self.token})
-                posts = [got[x] for x in chunk if x in got]
-            except FBError as e:
-                if e.kind != "comment":
-                    raise
-                posts = [self._get(f"{self.base}/{x}", {"fields": self.FIELDS, "access_token": self.token}) for x in chunk]
-            for p in posts:
-                out += self._post_items(p, now, include_answered)
+        for x in ids:
+            p = self._get(f"{self.base}/{x}", {"fields": self.FIELDS, "access_token": self.token})
+            out += self._post_items(p, now, include_answered)
         return out
 
     def comments(self, include_answered=False):
