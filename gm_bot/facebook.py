@@ -107,10 +107,19 @@ class Facebook:
 
     def _read_posts(self, ids, now, include_answered):
         """Повне читання постів по одному (параметр ids застарілий з Graph v26.0)."""
-        out = []
+        out, bad, last = [], 0, None
         for x in ids:
-            p = self._get(f"{self.base}/{x}", {"fields": self.FIELDS, "access_token": self.token})
+            try:
+                p = self._get(f"{self.base}/{x}", {"fields": self.FIELDS, "access_token": self.token})
+            except FBError as e:
+                if e.code != 100:
+                    raise
+                bad, last = bad + 1, e  # один пост Facebook не дає прочитати (інший тип/автор посту): пропускаємо
+                print(f"Facebook: пост {x} пропущено: {e}")
+                continue
             out += self._post_items(p, now, include_answered)
+        if bad and bad == len(ids):
+            raise last  # усі пости відмовлено: це не окремі пости, а права токена
         return out
 
     def comments(self, include_answered=False):
