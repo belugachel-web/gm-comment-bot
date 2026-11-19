@@ -16,10 +16,13 @@ class State:
         self.trial = {"ok": 0, "no": 0, "asked": False, "auto": False, **d.get("trial", {})}  # пробний період
         self.replies = d.get("replies", [])  # останні відправлені відповіді (для replies.md)
         self.pcache = d.get("pcache", {})    # id посту -> кількість коментарів на момент останнього повного читання (швидке читання)
+        self.rids = d.get("rids", {})        # id коментаря -> id нашої опублікованої відповіді (для виправлення/видалення)
 
-    def log_reply(self, c, reply):
+    def log_reply(self, c, reply, rid=""):
         """Запам'ятати відправлену відповідь: показується у replies.md (новіші зверху, останні 300)."""
-        self.replies.insert(0, {"t": time.time(), "page": c.get("page", ""), "author": c.get("author", ""),
+        if rid:
+            self.rids[c["id"]] = rid
+        self.replies.insert(0, {"t": time.time(), "page": c.get("page", ""), "author": c.get("author", ""), "cid": c.get("id", ""), "rid": rid,
                                 "comment": c.get("text", "")[:500], "reply": reply, "url": c.get("url", "")})
         del self.replies[300:]
 
@@ -37,6 +40,7 @@ class State:
             out += [f"### {when}" + (f" · {r['page']}" if r.get("page") else ""),
                     f"**Коментар:** {q(r['comment'])}", "",
                     f"**Відповідь:** {q(r['reply'])}", "",
+                    f"ID: `{r.get('cid', '')}` → `{r.get('rid', '')}`" if r.get("rid") else "",
                     f"[Відкрити]({r['url']})" if r.get("url") else "", "---", ""]
         return "\n".join(out)
 
@@ -44,7 +48,7 @@ class State:
         if not self.persist:
             return
         data = {"done": self.done, "offset": self.offset, "alerts": self.alerts,
-                "tries": self.tries, "daily": self.daily, "trial": self.trial, "replies": self.replies, "pcache": self.pcache}
+                "tries": self.tries, "daily": self.daily, "trial": self.trial, "replies": self.replies, "pcache": self.pcache, "rids": self.rids}
         self.path.write_text(json.dumps(data, ensure_ascii=False, indent=1), "utf-8")
         self.path.with_name("replies.md").write_text(self._render_replies(), "utf-8")
 

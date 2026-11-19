@@ -312,7 +312,7 @@ class Bot:
                 self.tg.send(f"⏸ Денний ліміт {S['max_replies_per_day']} відповідей досягнуто. Решта — завтра. Продовжити: /run")
             return
         try:
-            self.src.reply(c["id"], reply)
+            rid = self.src.reply(c["id"], reply)
         except FBError as e:
             print(f"Facebook відхилив відповідь на {c['id']}: {e.msg}")
             self.alert_fb(e)
@@ -336,7 +336,7 @@ class Bot:
         st.done[c["id"]] = "replied"
         st.tries.pop(c["id"], None)
         st.count_sent()
-        st.log_reply(c, reply)
+        st.log_reply(c, reply, rid if isinstance(rid, str) else "")
         st.save()
         self.fails, self.sent = 0, self.sent + 1
         self.stats["sent"] += 1

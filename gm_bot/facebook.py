@@ -193,6 +193,14 @@ class Facebook:
             raise FBError(0, "мережа Facebook недоступна")
         return self._check(r).get("id", "")
 
+    def edit(self, rid, msg):
+        """Редагує НАШУ раніше опубліковану відповідь (rid = id відповіді, не коментаря)."""
+        return self._check(self.http.post(f"{self.base}/{rid}", data={"message": msg, "access_token": self.token}))
+
+    def delete(self, rid):
+        """Видаляє НАШУ відповідь."""
+        return self._check(self.http.delete(f"{self.base}/{rid}", params={"access_token": self.token}))
+
 
 class Mock:
     """Вигадані коментарі з mock_comments.json: Facebook не потрібен."""
