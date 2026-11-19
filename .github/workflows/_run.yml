@@ -77,11 +77,14 @@ jobs:
           MODE: ${{ inputs.mode }}
           AGE: ${{ inputs.age }}
           LIMIT_NEXT: ${{ steps.bot.outputs.limit }}
+          PROCESSED: ${{ steps.bot.outputs.processed }}
         run: |
           EVJ="$(jq -r '.inputs.tg_event // ""' "$GITHUB_EVENT_PATH")"; [ -z "$EVJ" ] && EVJ='{}'
           N=$(echo "$EVJ" | jq -r '.chain // 0')
+          PREV=$(echo "$EVJ" | jq -r '.total // 0')
+          TOT=$((PREV + ${PROCESSED:-0}))  # скільки всього оброблено у ланцюжку (для підсумку в Telegram)
           if [ "$N" -ge 15 ]; then echo "Ланцюжок: досягнуто 15 запусків, зупиняюсь"; exit 0; fi
-          NEW=$(jq -nc --arg page "$PAGE" --arg mode "$MODE" --arg age "$AGE" --arg limit "$LIMIT_NEXT" --argjson chain "$((N + 1))" '{type:"run",page:$page,mode:$mode,age:$age,limit:$limit,chain:$chain}')
+          NEW=$(jq -nc --arg page "$PAGE" --arg mode "$MODE" --arg age "$AGE" --arg limit "$LIMIT_NEXT" --argjson chain "$((N + 1))" --argjson total "$TOT" '{type:"run",page:$page,mode:$mode,age:$age,limit:$limit,chain:$chain,total:$total}')
           gh workflow run service.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f tg_event="$NEW"
       - name: Сповістити про аварію
         if: failure()

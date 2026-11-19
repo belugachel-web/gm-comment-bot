@@ -5,7 +5,7 @@ import re
 import time
 
 from . import gemini
-from .checks import reply_ok, reply_safe
+from .checks import reply_market, reply_ok, reply_safe, reply_style, tidy
 from .config import ROOT
 from .facebook import FBError
 
@@ -22,12 +22,16 @@ def info(c):
 
 
 def validate(c, res, business):
-    """None = відповідь придатна; інакше причина."""
-    reply = (res.get("reply") or "").strip()
+    """None = відповідь придатна; інакше причина. Заодно дрібно виправляє текст (хвіст після посилання, зайві емодзі)."""
+    reply = tidy((res.get("reply") or "").strip())
+    res["reply"] = reply
     if not reply:
         return "порожня відповідь"
     if not reply_ok(c["text"], reply):
         return "відповідь не тією мовою або з битими літерами"
+    why = reply_style(reply) or reply_market(c["text"], reply, c.get("post_links") or [])
+    if why:
+        return why
     return reply_safe(reply, business + "\n" + "\n".join(c.get("post_links") or []))  # посилання з допису власника дозволені
 
 
@@ -35,6 +39,8 @@ class Bot:
     def __init__(self, S, st, src, tg, keys, system, business, ask=None, review=None):
         self.S, self.st, self.src, self.tg, self.keys = S, st, src, tg, keys
         self.system, self.business = system, business
+        if hasattr(src, "cache"):
+            src.cache = st.pcache  # кеш лічильників коментарів: Facebook читає повністю лише змінені старі пости
         self.ask = ask or gemini.ask_batch
         # друга перевірка ШІ: з підміненим ask (тести) вимкнена, якщо не передано review
         self.review = review or (gemini.review_batch if ask is None and S.get("review") else None)
@@ -46,6 +52,12 @@ class Bot:
         self.pending, self.errors = set(), []
         self.halt = self.quota = False
         self.fails = self.sent = 0
+        # лічильники запуску для підсумку в Telegram: sent надіслано сам, drafted чернетки, unknown «потрібна ваша відповідь»,
+        # skip пропущено, failed не вдалося остаточно, error збій ШІ (повторимо в наступному запуску)
+        self.stats = {"sent": 0, "drafted": 0, "unknown": 0, "skip": 0, "failed": 0, "error": 0}
+        self.why = ""  # чому запуск зупинився раніше (для підсумку)
+        self.label = S.get("page_name") or ""
+        self.todo_n, self.prog = 0, None  # прогрес-повідомлення в Telegram: скільки в запуску, id повідомлення (False = не редагуємо)
         self.more, self.left, self.stop, self.backlog, self.limit_left = False, 0, None, 0, None  # ланцюжок запусків: more = лишилась робота, треба ще запуск
         if self.mode == "auto" and self.live and S["page_id"] != S["auto_page_id"]:
             self.mode = "draft"
@@ -254,6 +266,7 @@ class Bot:
         status, reply = res.get("status"), (res.get("reply") or "").strip()
         if status == "QUOTA":
             self.quota = self.halt = True
+            self.why = "ліміт ключів Gemini"
             return
         if status == "ERROR":
             self.errors.append(res.get("reason", ""))
@@ -261,7 +274,10 @@ class Bot:
             if n >= S.get("max_ai_tries", 3):  # Gemini стабільно падає на цьому коментарі: більше не палимо квоту
                 st.done[c["id"]] = "failed"
                 st.tries.pop(c["id"], None)
+                self.stats["failed"] += 1
                 self.tg.send(f"⚠️ ШІ не зміг обробити коментар після {n} спроб, пропускаю. Відповісти треба самому: {c['url']}")
+            else:
+                self.stats["error"] += 1
             return  # поки ліміт не вичерпано — спробуємо в наступному запуску
         if status == "OK" and reply:
             body = f"{info(c)}{SEP}{reply}\n——"
@@ -274,22 +290,26 @@ class Bot:
                     head = f"🤔 Сумнів контролера: {doubt}\n" + head
                 self.tg.send(head + body, buttons=True)
                 st.done[c["id"]] = "drafted"
+                self.stats["drafted"] += 1
                 self.pending.add(c["id"])
             else:
                 self.publish(c, reply)
         elif status == "SKIP":
             st.done[c["id"]] = "skip"
+            self.stats["skip"] += 1
         else:
             self.tg.send(f"❓ ПОТРІБНА ВАША ВІДПОВІДЬ (ШІ не знає)\n{info(c)}\nПричина: {res.get('reason', status)}")
             st.done[c["id"]] = "unknown"
+            self.stats["unknown"] += 1
         print(f"[{status}]")  # лише статус: у публічних логах немає імен і текстів коментарів
 
     def publish(self, c, reply):
         S, st = self.S, self.st
         if st.sent_today() >= S["max_replies_per_day"]:
             self.halt = True
+            self.why = "денний ліміт відповідей"
             if st.alert_due("daily", 12):
-                self.tg.send(f"⏸ Денний ліміт {S['max_replies_per_day']} відповідей досягнуто. Решта — завтра.")
+                self.tg.send(f"⏸ Денний ліміт {S['max_replies_per_day']} відповідей досягнуто. Решта — завтра. Продовжити: /run")
             return
         try:
             self.src.reply(c["id"], reply)
@@ -298,14 +318,17 @@ class Bot:
             self.alert_fb(e)
             if e.kind in ("token", "limit"):
                 self.halt = True
+                self.why = "помилка Facebook (токен або обмеження)"
                 return
             n = st.tries[c["id"]] = st.tries.get(c["id"], 0) + 1
             if n >= 3:  # конкретний коментар не вдається (видалений/закритий): більше не чіпаємо
                 st.done[c["id"]] = "failed"
+                self.stats["failed"] += 1
                 self.tg.send(f"⚠️ Не вдалося відповісти після 3 спроб, пропускаю: {c['url']}\n{e.msg}")
             self.fails += 1
             if self.fails >= 3:
                 self.halt = True
+                self.why = "3 відмови Facebook поспіль"
                 if st.alert_due("fb_fail", 6):
                     self.tg.send("🚨 Facebook відхилив 3 відповіді поспіль (права застосунку або обмеження сторінки). "
                                  "Бот зупинився, перевірте сторінку.")
@@ -316,6 +339,7 @@ class Bot:
         st.log_reply(c, reply)
         st.save()
         self.fails, self.sent = 0, self.sent + 1
+        self.stats["sent"] += 1
         if S["notify_auto"]:
             self.tg.send(f"🤖 Надіслано автоматично\n{info(c)}{SEP}{reply}\n——", silent=True)
         a, b = S["gap_sec"]
@@ -349,6 +373,8 @@ class Bot:
         print(f"Режим={self.mode} джерело={S['source']} знайдено={len(items)} до обробки={len(todo)} (по {S['batch_size']} за запит)")
         if S["preview"]:
             self.tg.send(f"🧪 Перегляд: {len(todo)} відповідей нижче. Нічого не публікується, стан не змінюється.", silent=True)
+        self.todo_n = len(todo)
+        self.show_progress(0)
         for i in range(0, len(todo), max(1, S["batch_size"])):
             if self.halt:
                 break
@@ -360,9 +386,11 @@ class Bot:
                 if time.time() > self.deadline:
                     print("Час запуску вичерпано, решту зроблю в наступному запуску")
                     self.halt, self.stop = True, "time"
+                    self.why = "час запуску"
                     break
                 self.handle(c, res[c["id"]])
             st.save()
+            self.show_progress(len(st.done) - done0)
         # ланцюжок: наступний запуск робимо, лише якщо зупинились через час або ліміт запуску (не через помилку/ліміти)
         # і був прогрес (інакше було б нескінченне повторення)
         progress = len(st.done) - done0
@@ -373,15 +401,51 @@ class Bot:
             self.left = min(self.left, self.limit_left)
         self.more = bool(self.live and not S["preview"] and progress > 0 and (self.stop == "time" or (capped and not self.halt))
                          and (self.limit_left is None or self.limit_left > 0))
+        self.commit_cache(items)
         self.wait_buttons()
         if self.quota and st.alert_due("quota", 6):
             self.tg.send("⚠️ Усі Gemini-ключі вичерпали ліміт. Решта коментарів — у наступному запуску.")
         if self.errors and st.alert_due("gemini_error", 6):
             self.tg.send(f"⚠️ Gemini не відповів для {len(self.errors)} коментарів (повторю в наступному запуску): {self.errors[0]}")
-        if self.sent and not S["notify_auto"]:
-            self.tg.send(f"🤖 Надіслано автоматично: {self.sent}", silent=True)
         st.save()
         print(f"Готово за {time.time() - self.t0:.0f} с")
+
+    def processed(self):
+        """Скільки коментарів закрито цим запуском (збій ШІ «повторю» не рахується)."""
+        s = self.stats
+        return s["sent"] + s["drafted"] + s["unknown"] + s["skip"] + s["failed"]
+
+    def show_progress(self, n):
+        """Одне повідомлення «⚙️ працює: оброблено N з M» в Telegram; після кожної пачки редагується (не спамить)."""
+        if not self.live or self.S["preview"] or not self.todo_n or self.prog is False:
+            return
+        text = f"⏳ {self.label or 'Бот'}: оброблено {n} з {self.todo_n}"
+        if self.backlog > self.todo_n:
+            text += f" (всього в черзі {self.backlog})"
+        if self.prog is None:
+            r = self.tg.send(text, silent=True)
+            self.prog = r.get("message_id", False) if isinstance(r, dict) else False
+        else:
+            self.tg.edit(self.tg.chat_id, self.prog, text)
+
+    def commit_cache(self, items):
+        """Запам'ятовуємо кількість коментарів посту, лише якщо в ньому не лишилось необроблених коментарів
+        (інакше пост читатиметься знову, і нічого не загубиться)."""
+        S, st = self.S, self.st
+        rc = getattr(self.src, "read_counts", None)
+        if not rc or not self.live or S["preview"]:
+            return
+        mx = S["max_age_hours"] * 60
+        open_posts = set()
+        for c in items:
+            if c["id"] in st.done or not c["text"].strip() or c["age_min"] > mx:
+                continue
+            if c["age_min"] > S["old_after_hours"] * 60 and not S["reply_old"]:
+                continue
+            open_posts.add(c["post_id"])
+        for pid, n in rc.items():
+            if pid not in open_posts:
+                st.pcache[pid] = n
 
     def wait_buttons(self):
         """У draft після нових чернеток чекаємо натискань (в межах часу запуску)."""
@@ -409,7 +473,7 @@ class Bot:
         B = [("до 1 доби", 1440), ("1–7 діб", 10080), ("7–30 діб", 43200), ("30 діб – 1 рік", 525600), ("понад рік", 10**12)]
         bucket = lambda c: next(n for n, m in B if c["age_min"] <= m)
         lines = ["📊 Звіт" + (f" · {self.S['page_name']}" if self.S.get("page_name") else "") + age_txt + " (нічого не надсилано)", f"Коментарів без відповіді сторінки: {len(items)}",
-                 *([f"Постів переглянуто: {self.src.seen}" + (" ⚠️ ЛІМІТ max_posts: старіші пости НЕ прочитано" if getattr(self.src, "cut", False) else " (старіші за вік пости пропущено)" if getattr(self.src, "aged", False) else " (це всі пости сторінки)")]
+                 *([f"Постів переглянуто: {self.src.seen}" + (" ⚠️ ЛІМІТ max_posts: старіші пости НЕ прочитано" if getattr(self.src, "cut", False) else " (старі пости без нових коментарів не читали, повністю прочитано: %s)" % getattr(self.src, "read", "?") if getattr(self.src, "aged", False) else " (це всі пости сторінки)")]
                    if getattr(self.src, "seen", None) is not None else []),
                  f"Gemini-ключів у роботі: {len(getattr(self.keys, 'keys', []))}",
                  f"— нових, бот ще не чіпав: {len(new)}", f"— чернетки/ШІ не знав (чекають вас): {len(waiting)}", "", "За віком (нові):"]

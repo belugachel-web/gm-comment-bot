@@ -32,7 +32,7 @@ class Telegram:
             p["reply_markup"] = {"inline_keyboard": [[
                 {"text": "✅ Опублікувати", "callback_data": "ok"},
                 {"text": "❌ Скасувати", "callback_data": "no"}]]}
-        self._call("sendMessage", **p)
+        return self._call("sendMessage", **p)  # результат (з message_id) потрібен для прогрес-повідомлення, що редагується
 
     def clicks(self, offset, timeout=0):
         """Натискання кнопок. None = помилка/нема токена."""

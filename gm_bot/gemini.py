@@ -36,7 +36,7 @@ class Keys:
 def call_gemini(key, model, system, prompt, temperature):
     from google import genai
     from google.genai import types
-    client = genai.Client(api_key=key)
+    client = genai.Client(api_key=key, http_options=types.HttpOptions(timeout=180000))  # 3 хв: без цього запит міг висіти годинами
     kw = dict(system_instruction=system, response_mime_type="application/json", temperature=temperature)
     if THINKING and "lite" not in model:  # Flash-Lite обходимось без «думок» (швидше й економніше)
         try:
@@ -53,7 +53,7 @@ def _mk(S, model):
 
 
 def _ask(items, S, system, keys, temperature, call, model, prompt, fail):
-    errors = 0
+    errors = rl = 0
     mk = _mk(S, model)
     while True:
         k = keys.get(mk) if mk else keys.get()
@@ -63,12 +63,17 @@ def _ask(items, S, system, keys, temperature, call, model, prompt, fail):
             data = json.loads(call(k, model, system, prompt, temperature))
             lst = data if isinstance(data, list) else data.get("results", [])
             got = {str(x.get("id")): x for x in lst if isinstance(x, dict)}
+            for x in got.values():  # «ok»/«Skip » → OK/SKIP, щоб дрібна різниця в регістрі не ставала «потрібна ваша відповідь»
+                x["status"] = str(x.get("status") or "").strip().upper()
             return {c["id"]: got.get(c["id"], {"status": "ERROR", "reason": "Gemini пропустив коментар"}) for c in items}
         except Exception as e:
             m = str(e)
             if "429" in m or "RESOURCE_EXHAUSTED" in m:
                 daily = "PerDay" in m or "per day" in m.lower()
                 keys.mark(k, daily, mk) if mk else keys.mark(k, daily)
+                rl += 1
+                if rl > 3 * len(keys.keys) + 3:  # 429 повторюється вічно (не «на добу»): здаємось, далі запасна модель
+                    return fail("QUOTA", "Gemini 429 повторюється: " + m[:100])
                 continue
             errors += 1
             if errors >= 3:
@@ -111,7 +116,7 @@ REVIEW_SYSTEM = """Ти — суворий контролер відповіде
 Посилання з поля post_links дозволені (це посилання з допису власника), не вважай їх «не з бази».
 DOUBT, якщо будь-що з цього: reply називає факти (ціни, наявність, терміни, гарантії, умови, телефони, адреси), яких НЕМАЄ в БАЗІ; обіцяє те, чого немає в БАЗІ;
 не відповідає на суть коментаря; мова reply інша, ніж у comment (українська ↔ російська теж вважається різними; АЛЕ українське посилання на сайт у відповіді на російський коментар — це ПРАВИЛЬНО, не сумнів); тон грубий або недоречний; коментар — скарга, претензія,
-юридична або медична тема, провокація; сумнів будь-якого роду. OK лише якщо певний, що відповідь безпечна й точна.
+юридична або медична тема, провокація; політика, війна, релігія, санкції, доставка до країни-агресора; звернення на «ти» замість «Ви»; посилання у відповіді на банальну подяку чи смайл; сумнів будь-якого роду. OK лише якщо певний, що відповідь безпечна й точна.
 Відповідь — лише JSON-список."""
 
 
@@ -140,7 +145,7 @@ def review_batch(pairs, S, business, keys, call=None):
 def _review_try(model, ids, prompt, system, S, keys, call):
     """Одна модель контролера: (результат, None) або (None, причина збою)."""
     mk = _mk(S, model)
-    errors = 0
+    errors = rl = 0
     while True:
         k = keys.get(mk) if mk else keys.get()
         if not k:
@@ -164,6 +169,9 @@ def _review_try(model, ids, prompt, system, S, keys, call):
             if "429" in m or "RESOURCE_EXHAUSTED" in m:
                 daily = "PerDay" in m or "per day" in m.lower()
                 keys.mark(k, daily, mk) if mk else keys.mark(k, daily)
+                rl += 1
+                if rl > 3 * len(keys.keys) + 3:
+                    return None, "перевірка недоступна (429)"
                 continue
             errors += 1
             if errors >= 3:

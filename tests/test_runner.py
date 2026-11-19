@@ -418,3 +418,46 @@ def test_three_facebook_failures_in_a_row_halt(tmp_path):
     bot.run()
     assert bot.fails == 3 and src.replies == []
     assert any("3 відповіді поспіль" in m["text"] for m in tg.sent)
+
+
+# ---------- підсумок і прогрес запуску, дрібні виправлення відповідей ----------
+def test_stats_count_sent(tmp_path):
+    bot, st, tg, src = make(tmp_path, [comment("c1")])
+    bot.run()
+    assert bot.stats["sent"] == 1 and bot.processed() == 1
+
+
+def test_progress_message_sent_once(tmp_path):
+    bot, st, tg, src = make(tmp_path, [comment("c1"), comment("c2", age=20)])
+    bot.run()
+    assert sum("оброблено 0 з 2" in m["text"] for m in tg.sent) == 1
+
+
+def test_summary_text(tmp_path):
+    from gm_bot.main import run_summary
+    bot, st, tg, src = make(tmp_path, [comment("c1"), comment("c2", age=20)], mode="draft", wait_buttons_min=0)
+    bot.run()
+    txt = run_summary([bot], False, 0, bot.processed())
+    assert "оброблено 2" in txt and "2 чернеток" in txt and "Черга порожня" in txt
+
+
+def test_emoji_glued_to_link_is_fixed_not_blocked(tmp_path):
+    def ask(items, S, system, keys, temp=None):
+        return {c["id"]: {"status": "OK", "reply": "See https://grossmeister.com.ua/en/😊"} for c in items}
+    bot, st, tg, src = make(tmp_path, [comment("c1")], ask=ask)
+    bot.run()
+    assert src.replies == [("c1", "See https://grossmeister.com.ua/en/")]
+
+
+def test_hashtag_reply_is_blocked(tmp_path):
+    def ask(items, S, system, keys, temp=None):
+        return {c["id"]: {"status": "OK", "reply": "Thanks #sale"} for c in items}
+    bot, st, tg, src = make(tmp_path, [comment("c1")], ask=ask)
+    bot.run()
+    assert src.replies == [] and st.done["c1"] == "unknown"
+
+
+def test_lowercase_status_is_normalized():
+    out = json.dumps([{"id": "c1", "status": " ok ", "reply": "hi"}])
+    r = gemini.ask_batch([comment("c1")], S_G, "", gemini.Keys("k1"), call=lambda *a: out)
+    assert r["c1"]["status"] == "OK"

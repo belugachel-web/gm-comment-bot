@@ -50,6 +50,31 @@ def page_for_click(pages, ev):
     return pages[0]
 
 
+def run_summary(bots, more, prev_total, done):
+    """Підсумок запуску в Telegram: скільки оброблено, що саме, скільки лишилось і чому зупинилось."""
+    def line(s):
+        parts = [("📝", "чернеток", s["drafted"]), ("🤖", "надіслано сам", s["sent"]),
+                 ("❓", "потрібна ваша відповідь", s["unknown"]), ("⏭", "пропущено", s["skip"]),
+                 ("🚫", "не вдалось", s["failed"]), ("⚠️", "збій ШІ, повторю", s["error"])]
+        return " · ".join(f"{i} {n} {t}" for i, t, n in parts if n) or "нічого нового"
+    total = prev_total + done
+    left = sum(b.left for b in bots)
+    out = [f"✅ Запуск завершено: оброблено {done}" + (f" (усього у ланцюжку: {total})" if prev_total else "")]
+    active = [b for b in bots if b.processed() or b.stats["error"]]
+    if len(active) > 1:
+        out += [f"{b.label or 'бот'}: {line(b.stats)}" for b in active]
+    else:
+        out.append(line((active or bots)[0].stats))
+    why = ", ".join(dict.fromkeys(b.why for b in bots if b.why))
+    if left and more:
+        out.append(f"⏳ Лишилось ~{left}. Наступний запуск стартує сам.")
+    elif left:
+        out.append(f"⏸ Лишилось ~{left}" + (f" · зупинка: {why}" if why else "") + ". Продовжити: /run")
+    else:
+        out.append("Черга порожня: нових коментарів немає.")
+    return "\n".join(out)
+
+
 def make_source(S, P, env):
     """(джерело, система, база) для сторінки; None, якщо немає токена цієї сторінки."""
     business = (config.ROOT / P["business_file"]).read_text("utf-8")
@@ -98,8 +123,12 @@ def main(argv=None):
             src, system, business = made
             Bot(P, st, src, tg, keys, system, business).click_event(ev)
         else:
-            pending = 0
-            more, left = False, 0
+            bots = []
+            try:
+                prev_total = int(ev.get("total") or 0)  # скільки вже оброблено у попередніх запусках ланцюжка
+            except (TypeError, ValueError):
+                prev_total = 0
+            more = False
             lim_left = None
             for P in pages:
                 label = P["page_name"] or P["page_key"]
@@ -114,8 +143,8 @@ def main(argv=None):
                     print(f"=== Сторінка: {label} ===")
                     bot = Bot(P, st, src, tg, keys, system, business)
                     bot.run()
-                    pending += len(bot.pending)
-                    more, left = more or bot.more, left + bot.left
+                    bots.append(bot)
+                    more = more or bot.more
                     if bot.limit_left is not None:
                         lim_left = max(lim_left or 0, bot.limit_left)
                 except Exception as e:  # збій однієї сторінки не зупиняє іншу; після циклу все одно падаємо, щоб це було видно
@@ -127,15 +156,21 @@ def main(argv=None):
                     st.save()
             if first_error:
                 raise first_error
+            done = sum(b.processed() for b in bots)
+            if env.get("GITHUB_OUTPUT"):
+                with open(env["GITHUB_OUTPUT"], "a") as f:
+                    f.write(f"processed={done}\n")  # для лічильника «всього в ланцюжку»
             if more and env.get("GITHUB_OUTPUT"):  # сигнал для workflow: запустити наступний запуск (ланцюжок)
                 with open(env["GITHUB_OUTPUT"], "a") as f:
                     f.write("more=1\n")
                     f.write(f"limit={lim_left if lim_left is not None else ''}\n")  # скільки ще обробити у наступному запуску (порожньо = без обмеження)
-            if ev.get("type") == "run":  # запуск командою /run: повідомляємо, що бот закінчив
-                if more:
-                    tg.send(f"⏳ Запуск завершено, лишилось близько {left} коментарів. Наступний запуск стартує сам (нічого натискати не треба).", silent=True)
-                else:
-                    tg.send("✅ Бот завершив роботу. " + (f"Нових чернеток: {pending}." if pending else "Нових коментарів для відповіді немає."), silent=True)
+            if S["report"]:
+                pass  # звіт сам є повідомленням
+            elif S["preview"]:
+                if ev.get("type") == "run":
+                    tg.send("✅ Перегляд завершено (нічого не опубліковано).", silent=True)
+            elif bots and (ev.get("type") == "run" or done or any(b.stats["error"] for b in bots)):
+                tg.send(run_summary(bots, more, prev_total, done), silent=True)
     except Exception as e:  # показуємо причину аварії прямо в Telegram, щоб не шукати в логах
         if first_error is None:
             traceback.print_exc()

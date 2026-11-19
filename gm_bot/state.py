@@ -15,6 +15,7 @@ class State:
         self.daily = d.get("daily", {"date": "", "n": 0})
         self.trial = {"ok": 0, "no": 0, "asked": False, "auto": False, **d.get("trial", {})}  # пробний період
         self.replies = d.get("replies", [])  # останні відправлені відповіді (для replies.md)
+        self.pcache = d.get("pcache", {})    # id посту -> кількість коментарів на момент останнього повного читання (швидке читання)
 
     def log_reply(self, c, reply):
         """Запам'ятати відправлену відповідь: показується у replies.md (новіші зверху, останні 300)."""
@@ -43,7 +44,7 @@ class State:
         if not self.persist:
             return
         data = {"done": self.done, "offset": self.offset, "alerts": self.alerts,
-                "tries": self.tries, "daily": self.daily, "trial": self.trial, "replies": self.replies}
+                "tries": self.tries, "daily": self.daily, "trial": self.trial, "replies": self.replies, "pcache": self.pcache}
         self.path.write_text(json.dumps(data, ensure_ascii=False, indent=1), "utf-8")
         self.path.with_name("replies.md").write_text(self._render_replies(), "utf-8")
 
