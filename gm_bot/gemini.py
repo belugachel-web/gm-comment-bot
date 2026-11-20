@@ -43,8 +43,24 @@ def call_gemini(key, model, system, prompt, temperature):
             kw["thinking_config"] = types.ThinkingConfig(thinking_level=THINKING)
         except Exception:
             pass  # стара версія бібліотеки — працюємо без рівня думок
-    r = client.models.generate_content(model=model, contents=prompt, config=types.GenerateContentConfig(**kw))
+    r = _generate(client, model, prompt, kw, types)
     return r.text
+
+
+def _generate(client, model, prompt, kw, types):
+    """Нові моделі можуть відхилити temperature або рівень думок: при такій помилці повторюємо без цього параметра."""
+    try:
+        return client.models.generate_content(model=model, contents=prompt, config=types.GenerateContentConfig(**kw))
+    except Exception as e:
+        m = str(e).lower()
+        if "429" in m or "resource_exhausted" in m:
+            raise
+        drop = [k for k, w in (("temperature", "temperature"), ("thinking_config", "thinking")) if w in m and k in kw]
+        if not drop:
+            raise
+        for k in drop:
+            kw.pop(k)
+        return client.models.generate_content(model=model, contents=prompt, config=types.GenerateContentConfig(**kw))
 
 
 def _mk(S, model):

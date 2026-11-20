@@ -438,7 +438,7 @@ class Bot:
         q = lambda s: (s or "").replace("\n", " ")
         out = [f"# Перевірка {len(self.pv)} коментарів (нічого не опубліковано)", ""]
         for i, (c, s, reply, note) in enumerate(self.pv, 1):
-            out += [l for l in (f"## {i} · {s} · {c['id']}", f"Допис: {q(c.get('post'))[:150]}", f"Коментар: {q(c['text'])[:300]}",
+            out += [l for l in (f"## {i} · {s} · {c['id']}", f"Сторінка: {c.get('page') or '?'}", f"Допис: {q(c.get('post'))[:150]}", f"Коментар: {q(c['text'])[:300]}",
                                 f"Відповідь: {q(reply)}" if reply else "", f"Примітка: {q(note)}" if note else "") if l] + [""]
         (ROOT / "preview.md").write_text("\n".join(out), "utf-8")
         self.tg.send(f"📄 Готово: {len(self.pv)} у preview.md (репо coments-data). Дай його Gemini.", silent=True)

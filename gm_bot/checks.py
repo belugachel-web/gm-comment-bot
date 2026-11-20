@@ -16,6 +16,12 @@ def reply_ok(comment, reply):
     main = max(c, key=c.get)
     if r[main] == 0:
         return False
+    ru_only, uk_only = re.compile("[ыэъёЫЭЪЁ]"), re.compile("[іїєґІЇЄҐ]")  # рос. коментар → укр. відповідь і навпаки (алфавіт той самий)
+    if main == "cyr":
+        cc = comment
+        if (ru_only.search(cc) and not uk_only.search(cc) and uk_only.search(reply)) or \
+                (uk_only.search(cc) and not ru_only.search(cc) and ru_only.search(reply)):
+            return False
     if any(k != main and r[k] > 0 for k in ("cyr", "arb")):
         return False
     return not any(sum(1 for p in (CYR, ARB, LAT) if p.search(w)) > 1 for w in re.findall(r"\w+", reply))
