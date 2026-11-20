@@ -10,7 +10,7 @@ def reply_ok(comment, reply):
     """Відповідь тим самим алфавітом, що й коментар, без змішаних літер у словах."""
     def cnt(t):
         return {"cyr": len(CYR.findall(t)), "arb": len(ARB.findall(t)), "lat": len(LAT.findall(t))}
-    c, r = cnt(comment), cnt(reply)
+    c, r = cnt(re.sub(r"@\S+", "", comment)), cnt(reply)  # @-згадка сторінки не визначає мову
     if not any(c.values()):
         return True  # лише смайли
     main = max(c, key=c.get)
@@ -19,6 +19,19 @@ def reply_ok(comment, reply):
     if any(k != main and r[k] > 0 for k in ("cyr", "arb")):
         return False
     return not any(sum(1 for p in (CYR, ARB, LAT) if p.search(w)) > 1 for w in re.findall(r"\w+", reply))
+
+
+def is_noise(text):
+    """Коментар без жодної літери («5», «+», «???», «🔥🔥», «100»): відповідати нема на що, Gemini не кличемо.
+    Довгі числа (телефон, 5+ цифр) — не шум: людина лишила контакт."""
+    t = text or ""
+    return not re.search(r"[^\W\d_]", t) and len(re.findall(r"\d", t)) <= 4
+
+
+def off_topic(topics, *texts):
+    """Перше стороннє слово зі списку сторінки (напр. «нард» для STRYI) у тексті допису чи коментаря, інакше None."""
+    blob = " ".join(t or "" for t in texts).lower()
+    return next((w for w in (topics or []) if w.lower() in blob), None)
 
 
 _TAIL = r"""[^\s)>\]»”"']*"""

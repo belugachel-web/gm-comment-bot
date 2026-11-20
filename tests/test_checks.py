@@ -1,4 +1,4 @@
-from gm_bot.checks import mentions_foreign_country, reply_market, reply_ok, reply_safe, reply_style, tidy
+from gm_bot.checks import is_noise, mentions_foreign_country, off_topic, reply_market, reply_ok, reply_safe, reply_style, tidy
 
 BUSINESS = ("Сайти: https://grossmeister.com.ua , https://grossmeister.com.ua/en/ , https://grossmeister.com.ua/pl/\n"
             "Телефон: 073 723 44 55\nViber: +380 73 267-00-70\n8 000 покупців у 88 країнах")
@@ -86,3 +86,18 @@ def test_mentions_foreign_country():
     assert mentions_foreign_country("هل توصلون إلى المغرب؟")
     assert not mentions_foreign_country("Працює англійською? Німецька сталь?")
     assert not mentions_foreign_country("Доставка по Україні, Львів?")
+
+
+def test_is_noise():
+    for t in ("5", "+", "???", "🔥🔥", "100", "", "1 2 3", "+5!!"):
+        assert is_noise(t), t
+    for t in ("0501234567", "+380 50 123 45 67", "Ціна?", "好漂亮", "5 грн?", "Price"):
+        assert not is_noise(t), t
+
+
+def test_off_topic():
+    topics = ["нард", "chess"]
+    assert off_topic(topics, "Нарди з каменю", "Скільки?") == "нард"
+    assert off_topic(topics, "post", "Nice CHESS set") == "chess"
+    assert off_topic(topics, "Набір стамесок", "Скільки?") is None
+    assert off_topic([], "Нарди") is None and off_topic(None, "Нарди") is None

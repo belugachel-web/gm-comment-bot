@@ -5,7 +5,7 @@ import re
 import time
 
 from . import gemini
-from .checks import reply_market, reply_ok, reply_safe, reply_style, tidy
+from .checks import is_noise, off_topic, reply_market, reply_ok, reply_safe, reply_style, tidy
 from .config import ROOT
 from .facebook import FBError
 
@@ -50,6 +50,7 @@ class Bot:
         self.t0 = time.time()
         self.deadline = self.t0 + S["max_run_min"] * 60
         self.pending, self.errors = set(), []
+        self.pv = []  # збір на аудит (preview ≥ 20): коментарі + відповіді, що підуть у preview.md
         self.halt = self.quota = False
         self.fails = self.sent = 0
         # лічильники запуску для підсумку в Telegram: sent надіслано сам, drafted чернетки, unknown «потрібна ваша відповідь»,
@@ -215,7 +216,7 @@ class Bot:
 
     # ---------- відбір ----------
     def pick(self, items):
-        S, st, todo = self.S, self.st, []
+        S, st, todo, off = self.S, self.st, [], []
         for c in sorted(items, key=lambda c: c["age_min"]):  # нові першими
             if c["id"] in st.done or not c["text"].strip():
                 continue
@@ -224,7 +225,21 @@ class Bot:
                 continue
             if not old and c["age_min"] < S["new_wait_min"]:
                 continue  # ще рано, відповімо в наступному запуску
+            if is_noise(c["text"]):  # «5», «+», «???», лише емодзі: без Gemini, мовчки пропускаємо
+                if not S["preview"]:
+                    st.done[c["id"]] = "skip"
+                continue
+            topic = off_topic(S.get("skip_topics"), c.get("post"), c["text"])
+            if topic:  # допис/коментар про чужий товар (нарди на сторінці STRYI): бот мовчить, власник бачить одне зведення
+                if not S["preview"]:
+                    st.done[c["id"]] = "skip"
+                    off.append((topic, c))
+                continue
             todo.append(c)
+        if off:
+            self.tg.send(f"⏭ Пропустив {len(off)} коментарів під чужою темою ({', '.join(sorted({t for t, _ in off}))}). "
+                         "Відповісти треба самому:\n" + "\n".join(c["url"] for _, c in off[:10]) +
+                         (f"\n…і ще {len(off) - 10}" if len(off) > 10 else ""), silent=True)
         n = S["preview"]
         if not n:
             self.backlog = len(todo)  # скільки всього чекає, до обрізки по max_replies_per_run
@@ -279,6 +294,9 @@ class Bot:
             else:
                 self.stats["error"] += 1
             return  # поки ліміт не вичерпано — спробуємо в наступному запуску
+        if S["preview"] >= 20 and status in ("OK", "SKIP", "UNKNOWN"):  # збір на аудит: у файл, не в Telegram
+            self.pv.append((c, status, reply, res.get("doubt") or res.get("reason") or ""))
+            return
         if status == "OK" and reply:
             body = f"{info(c)}{SEP}{reply}\n——"
             doubt = res.get("doubt")
@@ -383,7 +401,7 @@ class Bot:
             for c in chunk:
                 if self.halt:
                     break
-                if time.time() > self.deadline:
+                if time.time() >= self.deadline:
                     print("Час запуску вичерпано, решту зроблю в наступному запуску")
                     self.halt, self.stop = True, "time"
                     self.why = "час запуску"
@@ -402,6 +420,7 @@ class Bot:
         self.more = bool(self.live and not S["preview"] and progress > 0 and (self.stop == "time" or (capped and not self.halt))
                          and (self.limit_left is None or self.limit_left > 0))
         self.commit_cache(items)
+        self.write_preview()
         self.wait_buttons()
         if self.quota and st.alert_due("quota", 6):
             self.tg.send("⚠️ Усі Gemini-ключі вичерпали ліміт. Решта коментарів — у наступному запуску.")
@@ -409,6 +428,18 @@ class Bot:
             self.tg.send(f"⚠️ Gemini не відповів для {len(self.errors)} коментарів (повторю в наступному запуску): {self.errors[0]}")
         st.save()
         print(f"Готово за {time.time() - self.t0:.0f} с")
+
+    def write_preview(self):
+        """preview ≥ 20: все в preview.md (workflow вантажить у coments-data), у Telegram один рядок."""
+        if not self.pv:
+            return
+        q = lambda s: (s or "").replace("\n", " ")
+        out = [f"# Перевірка {len(self.pv)} коментарів (нічого не опубліковано)", ""]
+        for i, (c, s, reply, note) in enumerate(self.pv, 1):
+            out += [l for l in (f"## {i} · {s} · {c['id']}", f"Допис: {q(c.get('post'))[:150]}", f"Коментар: {q(c['text'])[:300]}",
+                                f"Відповідь: {q(reply)}" if reply else "", f"Примітка: {q(note)}" if note else "") if l] + [""]
+        (ROOT / "preview.md").write_text("\n".join(out), "utf-8")
+        self.tg.send(f"📄 Готово: {len(self.pv)} у preview.md (репо coments-data). Дай його Gemini.", silent=True)
 
     def processed(self):
         """Скільки коментарів закрито цим запуском (збій ШІ «повторю» не рахується)."""

@@ -461,3 +461,29 @@ def test_lowercase_status_is_normalized():
     out = json.dumps([{"id": "c1", "status": " ok ", "reply": "hi"}])
     r = gemini.ask_batch([comment("c1")], S_G, "", gemini.Keys("k1"), call=lambda *a: out)
     assert r["c1"]["status"] == "OK"
+
+
+# ---------- шум і чужа тема без Gemini ----------
+def no_gemini(*a, **k):
+    raise AssertionError("Gemini не має викликатись")
+
+
+def test_noise_comment_skipped_without_gemini(tmp_path):
+    bot, st, tg, src = make(tmp_path, [comment("c1", "5"), comment("c2", "🔥🔥", age=20), comment("c3", "+", age=30)], ask=no_gemini)
+    bot.run()
+    assert [st.done[k] for k in ("c1", "c2", "c3")] == ["skip"] * 3 and src.replies == []
+
+
+def test_phone_number_comment_goes_to_gemini(tmp_path):
+    bot, st, tg, src = make(tmp_path, [comment("c1", "0501234567")])
+    bot.run()
+    assert len(src.replies) == 1
+
+
+def test_off_topic_post_skipped_with_one_notice(tmp_path):
+    c1 = {**comment("c1", "Скільки коштує?"), "post": "Нарди з каменю"}
+    c2 = {**comment("c2", "Ціна?", age=20), "post": "Нарди з каменю"}
+    bot, st, tg, src = make(tmp_path, [c1, c2], ask=no_gemini, skip_topics=["нард"])
+    bot.run()
+    assert st.done["c1"] == "skip" and st.done["c2"] == "skip" and src.replies == []
+    assert sum("чужою темою" in m["text"] for m in tg.sent) == 1

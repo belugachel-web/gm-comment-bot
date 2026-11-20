@@ -9,7 +9,7 @@ import httpx
 from .config import ROOT
 
 TOKEN_CODES = {190, 102}                  # токен недійсний / прострочений
-LIMIT_CODES = {4, 17, 32, 341, 368, 613}  # ліміти й блокування від Facebook
+LIMIT_CODES = {4, 17, 32, 80001, 341, 368, 613}  # ліміти й блокування від Facebook (80001 = ліміт сторінки для Page-токена)
 
 
 class FBError(Exception):

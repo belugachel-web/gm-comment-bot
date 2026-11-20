@@ -1,8 +1,10 @@
 """Stress-тест: 130 вигаданих коментарів проходять через справжній Gemini + контролер. Нічого не публікується,
 у Telegram іде одне підсумкове повідомлення. Запуск: Actions → Run workflow → stress."""
+import json
 import random
 import time
 
+from .config import ROOT
 from .runner import Bot
 from .state import State
 
@@ -55,7 +57,45 @@ class _Null:
         pass
 
 
+def run_custom(S, keys, system, business, tg, cases, limit_min=15):
+    """Свої кейси з stress_cases.json (поля id, author, text, post, age_min, expect): прогін через Gemini + контролер,
+    нічого не публікується. У Telegram: по кожному кейсу статус, відповідь і очікування (стисло), частинами."""
+    S = {**S, "source": "mock", "preview": 0}
+    bot = Bot(S, State(None, False), None, _Null(), keys, system, business)
+    items = [{"url": "(stress)", "age_min": 600, "post": "", **c} for c in cases]
+    t0, res, size = time.time(), {}, max(1, S["batch_size"])
+    for i in range(0, len(items), size):
+        if time.time() - t0 > limit_min * 60:
+            break
+        chunk = items[i:i + size]
+        res.update(bot.generate(chunk))
+        if any(res[c["id"]].get("status") == "QUOTA" for c in chunk):
+            print("Ліміт ключів: зупиняюсь")
+            break
+    blocks = [f"🧪 Stress з файлу: {len(res)} з {len(items)} за {time.time() - t0:.0f} с (нічого не публікувалось)"]
+    for c in items:
+        r = res.get(c["id"])
+        if not r:
+            continue
+        mark = "🤔" if r.get("doubt") else ""
+        blocks.append(f"{c['id']} [{r.get('status')}]{mark} «{c['text'][:90]}»\n→ {(r.get('reply') or r.get('reason') or '')[:260]}"
+                      + (f"\n🤔 {r['doubt'][:120]}" if r.get("doubt") else "")
+                      + f"\n❓ {c.get('expect', '')[:130]}")
+    msg = ""
+    for b in blocks:
+        if len(msg) + len(b) > 3500:
+            tg.send(msg)
+            msg = ""
+        msg += b + "\n\n"
+    if msg.strip():
+        tg.send(msg)
+    print(blocks[0])
+
+
 def run(S, keys, system, business, tg, n=130, limit_min=15):
+    cf = ROOT / "stress_cases.json"  # якщо файл є — ганяємо його, а не вбудовані кейси про нарди
+    if cf.exists():
+        return run_custom(S, keys, system, business, tg, json.loads(cf.read_text("utf-8")), limit_min)
     S = {**S, "source": "mock", "preview": 0}
     bot = Bot(S, State(None, False), None, _Null(), keys, system, business)
     items, t0, res = make(n), time.time(), {}

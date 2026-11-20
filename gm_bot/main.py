@@ -28,7 +28,7 @@ def page_list(S, env):
         P = {**S, "page_id": p.get("page_id", S["page_id"]), "auto_page_id": p.get("auto_page_id", ""),
              "business_file": p.get("business_file", S["business_file"]),
              "page_name": p.get("name", ""), "page_key": p.get("key") or p.get("name", ""),
-             "token_env": p.get("token_env", "FB_PAGE_ACCESS_TOKEN")}
+             "token_env": p.get("token_env", "FB_PAGE_ACCESS_TOKEN"), "skip_topics": p.get("skip_topics", [])}
         # режим: ручний вибір у запуску > режим сторінки > загальний; перегляд завжди draft
         P["mode"] = "draft" if S["preview"] else (env.get("MODE") or p.get("mode") or S["mode"])
         out.append(P)
