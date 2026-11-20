@@ -17,7 +17,7 @@ class Keys:
         # model=None — основна модель; для інших моделей ліміт рахується окремо
         self.dead[k if model is None else (k, model)] = float("inf") if daily else time.time() + 62
 
-    def get(self, model=None):
+    def get(self, model=None, wait=True):
         while self.keys:
             now = time.time()
             for _ in self.keys:
@@ -27,8 +27,8 @@ class Keys:
                     return k
             mine = [self.dead.get(k if model is None else (k, model), 0) for k in self.keys]
             wake = min(mine)
-            if wake == float("inf"):
-                return None  # усі ключі вичерпали добу для цієї моделі
+            if wake == float("inf") or not wait:
+                return None  # усі ключі вичерпали добу для цієї моделі (або wait=False: не чекаємо хвилину, йдемо на наступну модель)
             _sleep(max(1, wake - now))
         return None
 
@@ -68,11 +68,11 @@ def _mk(S, model):
     return None if model == S["model"] else model
 
 
-def _ask(items, S, system, keys, temperature, call, model, prompt, fail):
+def _ask(items, S, system, keys, temperature, call, model, prompt, fail, last=True):
     errors = rl = 0
     mk = _mk(S, model)
     while True:
-        k = keys.get(mk) if mk else keys.get()
+        k = keys.get(mk, wait=last)  # не остання модель: ліміт ключів = одразу наступна модель, без очікування
         if not k:
             return fail("QUOTA", "Усі Gemini-ключі вичерпані")
         try:
@@ -109,18 +109,17 @@ def ask_batch(items, S, system, keys, temp=None, call=None):
     fail = lambda status, why: {c["id"]: {"status": status, "reason": why} for c in items}
     temperature = S["temperature"] if temp is None else temp
     call = call or call_gemini
-    res = _ask(items, S, system, keys, temperature, call, S["model"], prompt, fail)
     fbs = S.get("fallback_model") or []
     if isinstance(fbs, str):
         fbs = [fbs]
-    for fb in fbs:  # запасні моделі по черзі, лише для коментарів, що лишились без відповіді
-        if not fb or fb == S["model"]:
-            continue
+    fbs = [fb for fb in fbs if fb and fb != S["model"]]
+    res = _ask(items, S, system, keys, temperature, call, S["model"], prompt, fail, last=not fbs)
+    for n, fb in enumerate(fbs):  # запасні моделі по черзі, лише для коментарів, що лишились без відповіді
         sub = [c for c in items if res[c["id"]].get("status") in ("QUOTA", "ERROR")]
         if not sub:
             break
         fail2 = lambda status, why, sub=sub: {c["id"]: {"status": status, "reason": why} for c in sub}
-        res2 = _ask(sub, S, system, keys, temperature, call, fb, mkp(sub), fail2)
+        res2 = _ask(sub, S, system, keys, temperature, call, fb, mkp(sub), fail2, last=n == len(fbs) - 1)
         for c in sub:
             if res2.get(c["id"], {}).get("status") not in ("QUOTA", "ERROR", None):
                 res[c["id"]] = res2[c["id"]]
@@ -151,19 +150,19 @@ def review_batch(pairs, S, business, keys, call=None):
         fbs = [fbs]
     models += [m for m in fbs if m and m not in models]
     why = "перевірка недоступна"
-    for model in models:
-        out, why = _review_try(model, ids, prompt, system, S, keys, call)
+    for n, model in enumerate(models):
+        out, why = _review_try(model, ids, prompt, system, S, keys, call, last=n == len(models) - 1)
         if out is not None:
             return out
     return {i: why for i in ids}  # жодна модель не відповіла = сумнів (власнику)
 
 
-def _review_try(model, ids, prompt, system, S, keys, call):
+def _review_try(model, ids, prompt, system, S, keys, call, last=True):
     """Одна модель контролера: (результат, None) або (None, причина збою)."""
     mk = _mk(S, model)
     errors = rl = 0
     while True:
-        k = keys.get(mk) if mk else keys.get()
+        k = keys.get(mk, wait=last)
         if not k:
             return None, "перевірка недоступна (ліміт ключів)"
         try:

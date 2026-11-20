@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from gm_bot import gemini
@@ -37,3 +39,31 @@ def test_rate_limit_error_is_not_swallowed():
     with pytest.raises(Exception):
         gemini._generate(c, "m", "p", {"temperature": 0.4}, T)
     assert len(c.calls) == 1
+
+
+COMMENT = {"id": "c1", "author": "A", "text": "x", "post": "p"}
+
+
+def test_rate_limited_primary_goes_to_next_model_without_waiting(monkeypatch):
+    slept = []
+    monkeypatch.setattr(gemini, "_sleep", lambda s: slept.append(s))
+
+    def call(k, model, *a):
+        if model == "m1":
+            raise Exception("429 RESOURCE_EXHAUSTED per minute")
+        return json.dumps([{"id": "c1", "status": "OK", "reply": "hi"}])
+    r = gemini.ask_batch([COMMENT], {"model": "m1", "fallback_model": ["m2"], "temperature": 0.4}, "", gemini.Keys("k1"), call=call)
+    assert r["c1"]["status"] == "OK" and slept == []
+
+
+def test_review_rate_limited_goes_to_next_model_without_waiting(monkeypatch):
+    slept = []
+    monkeypatch.setattr(gemini, "_sleep", lambda s: slept.append(s))
+
+    def call(k, model, *a):
+        if model == "m1":
+            raise Exception("429 RESOURCE_EXHAUSTED per minute")
+        return json.dumps([{"id": "c1", "verdict": "OK", "why": ""}])
+    S = {"model": "m1", "review_model": "m1", "fallback_model": ["m2"]}
+    r = gemini.review_batch([(COMMENT, "r")], S, "", gemini.Keys("k1"), call=call)
+    assert r["c1"] is None and slept == []
