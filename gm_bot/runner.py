@@ -334,9 +334,11 @@ class Bot:
         except FBError as e:
             print(f"Facebook відхилив відповідь на {c['id']}: {e.msg}")
             self.alert_fb(e)
-            if e.kind in ("token", "limit"):
+            if e.kind in ("token", "limit") or e.code not in (100, 33):  # будь-яка незвична помилка = миттєвий стоп (щоб не погіршити блок)
                 self.halt = True
-                self.why = "помилка Facebook (токен або обмеження)"
+                self.why = f"помилка Facebook {e.code}"
+                if e.kind == "comment" and st.alert_due("fb_stop", 1):
+                    self.tg.send(f"🛑 Facebook повернув помилку, бот зупинився: {e.msg}")
                 return
             n = st.tries[c["id"]] = st.tries.get(c["id"], 0) + 1
             if n >= 3:  # конкретний коментар не вдається (видалений/закритий): більше не чіпаємо

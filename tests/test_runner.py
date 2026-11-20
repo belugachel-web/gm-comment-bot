@@ -420,6 +420,15 @@ def test_three_facebook_failures_in_a_row_halt(tmp_path):
     assert any("3 відповіді поспіль" in m["text"] for m in tg.sent)
 
 
+def test_unusual_facebook_error_halts_immediately(tmp_path):
+    items = [comment(f"c{i}", age=10 + i) for i in range(3)]
+    bot, st, tg, src = make(tmp_path, items, fail=FBError(1, "unknown"))
+    bot.run()
+    assert bot.fails == 0 and src.replies == [] and bot.halt
+    assert not any(k in st.tries for k in ("c1", "c2"))  # другий коментар уже не чіпали
+    assert any("бот зупинився" in m["text"] for m in tg.sent)
+
+
 # ---------- підсумок і прогрес запуску, дрібні виправлення відповідей ----------
 def test_stats_count_sent(tmp_path):
     bot, st, tg, src = make(tmp_path, [comment("c1")])
