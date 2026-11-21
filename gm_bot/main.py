@@ -28,7 +28,8 @@ def page_list(S, env):
         P = {**S, "page_id": p.get("page_id", S["page_id"]), "auto_page_id": p.get("auto_page_id", ""),
              "business_file": p.get("business_file", S["business_file"]),
              "page_name": p.get("name", ""), "page_key": p.get("key") or p.get("name", ""),
-             "token_env": p.get("token_env", "FB_PAGE_ACCESS_TOKEN"), "skip_topics": p.get("skip_topics", [])}
+             "token_env": p.get("token_env", "FB_PAGE_ACCESS_TOKEN"), "skip_topics": p.get("skip_topics", []),
+             "alt_topics": p.get("alt_topics") or {}}
         # режим: ручний вибір у запуску > режим сторінки > загальний; перегляд завжди draft
         P["mode"] = "draft" if S["preview"] else (env.get("MODE") or p.get("mode") or S["mode"])
         out.append(P)
@@ -73,6 +74,20 @@ def run_summary(bots, more, prev_total, done):
     else:
         out.append("Черга порожня: нових коментарів немає.")
     return "\n".join(out)
+
+
+ALT_NOTE = ("ТЕМА: цей допис або коментар про нарди чи шахи. Відповідай як сторінка GrossMeister за базою нижче "
+            "(її сайти й контакти); правило про «інший бренд» тут не застосовується.")
+
+
+def make_alt(P):
+    """Нарди/шахи на мультібрендовій сторінці (STRYI): інша база знань. {words, system, business} або None."""
+    cfg = P.get("alt_topics") or {}
+    if not cfg.get("words"):
+        return None
+    business = (config.ROOT / cfg["business_file"]).read_text("utf-8")
+    system = (config.ROOT / P["prompt_file"]).read_text("utf-8") + "\n\n" + ALT_NOTE + "\n\nБАЗА:\n" + business
+    return {"words": cfg["words"], "business": business, "system": system}
 
 
 def make_source(S, P, env):
@@ -141,7 +156,7 @@ def main(argv=None):
                         continue
                     src, system, business = made
                     print(f"=== Сторінка: {label} ===")
-                    bot = Bot(P, st, src, tg, keys, system, business)
+                    bot = Bot(P, st, src, tg, keys, system, business, alt=make_alt(P))
                     bot.run()
                     bots.append(bot)
                     more = more or bot.more

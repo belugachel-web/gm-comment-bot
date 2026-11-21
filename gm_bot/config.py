@@ -23,6 +23,7 @@ DEFAULTS = {
     "reply_old": True,
     "old_after_hours": 6,        # «старий» коментар
     "max_age_hours": 720,        # старші за це ігноруємо
+    "preview_days": 45,          # preview: брати лише пости/коментарі за стільки днів (усі — через AGE=all)
     "new_wait_min": 0,           # скільки хв чекати перед відповіддю на новий
     "gap_sec": [20, 90],         # пауза між публікаціями (захист від спам-фільтра)
     "max_replies_per_run": 15,
@@ -62,7 +63,7 @@ def load(env=None):
     if S["source"] == "facebook" and not S["page_id"] and not S["pages"]:
         raise SystemExit("settings.json: не вказано page_id")
     if S["preview"]:
-        S.update(mode="draft", reply_old=True, max_age_hours=9_999_999, old_after_hours=0,
+        S.update(mode="draft", reply_old=True, max_age_hours=S["preview_days"] * 24, old_after_hours=0,
                  new_wait_min=0, gap_sec=[0, 0], max_replies_per_run=S["preview"])
     # вік коментарів (з Telegram-меню / ручного запуску): AGE = all | число днів. Діє і на відповіді, і на звіт, і на перегляд
     S["age_set"], S["age_days"] = False, 0

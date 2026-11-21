@@ -105,10 +105,15 @@ class Facebook:
                             "age_min": (now - _parse_time(r["created_time"])).total_seconds() / 60})
         return out
 
-    def _read_posts(self, ids, now, include_answered):
-        """Повне читання постів по одному (параметр ids застарілий з Graph v26.0)."""
-        out, bad, last = [], 0, None
+    def _read_posts(self, ids, now, include_answered, want=None):
+        """Повне читання постів по одному (параметр ids застарілий з Graph v26.0).
+        want (лише preview): зупинитись, щойно зібрано стільки свіжих коментарів."""
+        out, bad, last, tried, good = [], 0, None, 0, 0
+        mx = (self.S.get("max_age_hours") or 0) * 60
         for x in ids:
+            if want and good >= want:
+                break
+            tried += 1
             try:
                 p = self._get(f"{self.base}/{x}", {"fields": self.FIELDS, "access_token": self.token})
             except FBError as e:
@@ -117,8 +122,11 @@ class Facebook:
                 bad, last = bad + 1, e  # один пост Facebook не дає прочитати (інший тип/автор посту): пропускаємо
                 print(f"Facebook: пост {x} пропущено (FB 100, недоступний для читання)")
                 continue
-            out += self._post_items(p, now, include_answered)
-        if bad and bad == len(ids):
+            items = self._post_items(p, now, include_answered)
+            out += items
+            good += sum(1 for c in items if c["text"].strip() and (not mx or c["age_min"] <= mx))
+        self.read = tried
+        if bad and bad == tried:
             raise last  # усі пости відмовлено: це не окремі пости, а права токена
         return out
 
@@ -151,13 +159,16 @@ class Facebook:
             cutoff = now - dt.timedelta(hours=mh + S.get("post_margin_days", 14) * 24)
         self.read_counts, self.aged = {}, False
         to_read = []
+        want = max(S["preview"] * 3, 30) if S.get("preview") else None  # preview: читаємо свіжі пости, доки не набралось досить коментарів для вибірки
         page = self._get(f"{self.base}/{self.pid}/posts",
                          {"fields": self.LIGHT, "limit": 100, "access_token": self.token})
         while page:
+            fresh_here = False
             for p in page.get("data", []):
                 seen += 1
                 n = ((p.get("comments") or {}).get("summary") or {}).get("total_count")
                 fresh = cutoff is None or n is None or not p.get("created_time") or _parse_time(p["created_time"]) >= cutoff
+                fresh_here = fresh_here or fresh
                 if not fresh:
                     old = self.cache.get(p["id"])
                     if old is None:
@@ -171,9 +182,9 @@ class Facebook:
                 if n is not None:
                     self.read_counts[p["id"]] = n
             nxt = page.get("paging", {}).get("next")
-            page = self._get(nxt) if nxt and seen < S["max_posts"] else None
-        out = self._read_posts(to_read, now, include_answered)
-        self.read = len(to_read)
+            stop = bool(want) and cutoff is not None and not fresh_here  # preview: далі лише старіші пости, сторінки не гортаємо
+            page = self._get(nxt) if nxt and seen < S["max_posts"] and not stop else None
+        out = self._read_posts(to_read, now, include_answered, want)  # self.read = скільки постів справді прочитано
         print(f"Facebook: постів у списку = {seen}, повністю прочитано = {self.read}")
         self.seen = seen
         self.cut = bool(nxt) and seen >= S["max_posts"]  # True = є ще старіші пости, яких ми не бачили (ліміт max_posts)

@@ -47,3 +47,14 @@ def test_report_without_age_counts_all(tmp_path):
     bot, st, tg, src = make(tmp_path, items, report=True)
     bot.run()
     assert "Коментарів без відповіді сторінки: 2" in tg.sent[-1]["text"]
+
+
+def test_preview_takes_only_recent_by_default():
+    S = load(PREVIEW="10")
+    assert S["max_age_hours"] == S["preview_days"] * 24 and S["max_age_hours"] < 24 * 100
+    assert not S["age_set"]
+
+
+def test_preview_age_all_takes_everything():
+    S = load(PREVIEW="10", AGE="all")
+    assert S["max_age_hours"] > 10**6 and S["age_set"]

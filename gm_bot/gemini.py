@@ -1,6 +1,7 @@
 """Gemini: ротація ключів, один запит на пачку коментарів, повтори при збоях, запасна модель."""
 import json
 import os
+import re
 import time
 
 _sleep = time.sleep  # у тестах підміняється
@@ -68,6 +69,13 @@ def _mk(S, model):
     return None if model == S["model"] else model
 
 
+def model_error(m):
+    """400/404: модель не знайдена або не підтримується. Повтори не допоможуть: одразу наступна модель."""
+    low = m.lower()
+    code = re.search(r"(?<!\d)(?:400|404)(?!\d)", low) or "not_found" in low or "invalid_argument" in low
+    return bool(code and ("model" in low or "not found" in low or "not supported" in low))
+
+
 def _ask(items, S, system, keys, temperature, call, model, prompt, fail, last=True):
     errors = rl = 0
     mk = _mk(S, model)
@@ -91,6 +99,8 @@ def _ask(items, S, system, keys, temperature, call, model, prompt, fail, last=Tr
                 if rl > 3 * len(keys.keys) + 3:  # 429 повторюється вічно (не «на добу»): здаємось, далі запасна модель
                     return fail("QUOTA", "Gemini 429 повторюється: " + m[:100])
                 continue
+            if model_error(m):  # модель не знайдена / не підтримується: без повторів, одразу запасна модель
+                return fail("ERROR", f"модель {model}: {m[:120]}")
             errors += 1
             if errors >= 3:
                 return fail("ERROR", f"{type(e).__name__}: {m[:120]}")
@@ -126,11 +136,12 @@ def ask_batch(items, S, system, keys, temp=None, call=None):
     return res
 
 
-REVIEW_SYSTEM = """Ти — суворий контролер відповідей бізнес-сторінки. На вході JSON-список {id, comment, reply}.
+REVIEW_SYSTEM = """Ти — суворий контролер відповідей бізнес-сторінки. На вході JSON-список {id, comment, reply, post?}.
 Для КОЖНОГО елемента поверни {"id", "verdict": "OK" або "DOUBT", "why": коротко українською}.
 Посилання з поля post_links дозволені (це посилання з допису власника), не вважай їх «не з бази».
+Орієнтуйся на поле post (текст допису): сторінки STRYI (стамески) і GrossMeister (нарди/шахи, grossmeister.com.ua) одного власника; на STRYI бувають дописи про нарди/шахи, тому згадка нард/шахів і посилання grossmeister.com.ua в таких дописах або у відповіді на питання про нарди/шахи — ПРАВИЛЬНО, не вважай це «не тим сайтом» чи «чужою темою».
 DOUBT, якщо будь-що з цього: reply називає факти (ціни, наявність, терміни, гарантії, умови, телефони, адреси), яких НЕМАЄ в БАЗІ; обіцяє те, чого немає в БАЗІ;
-не відповідає на суть коментаря; мова reply інша, ніж у comment (українська ↔ російська теж вважається різними; АЛЕ українське посилання на сайт у відповіді на російський коментар — це ПРАВИЛЬНО, не сумнів); тон грубий або недоречний; коментар — скарга, претензія,
+не відповідає на суть коментаря (з урахуванням post); мова reply інша, ніж у comment (українська ↔ російська теж вважається різними; АЛЕ українське посилання на сайт у відповіді на російський коментар — це ПРАВИЛЬНО, не сумнів); тон грубий або недоречний; коментар — скарга, претензія,
 юридична або медична тема, провокація; політика, війна, релігія, санкції, доставка до країни-агресора; звернення на «ти» замість «Ви»; посилання у відповіді на банальну подяку чи смайл; сумнів будь-якого роду. OK лише якщо певний, що відповідь безпечна й точна.
 Відповідь — лише JSON-список."""
 
@@ -141,6 +152,7 @@ def review_batch(pairs, S, business, keys, call=None):
     ids = [c["id"] for c, _ in pairs]
     prompt = "Перевір:\n" + json.dumps(
         [{"id": c["id"], "comment": c["text"][:1000], "reply": r,
+          **({"post": c["post"][:300]} if c.get("post") else {}),
           **({"post_links": c["post_links"]} if c.get("post_links") else {})} for c, r in pairs], ensure_ascii=False)
     system = REVIEW_SYSTEM + "\n\nБАЗА:\n" + business
     call = call or call_gemini
@@ -188,7 +200,9 @@ def _review_try(model, ids, prompt, system, S, keys, call, last=True):
                 if rl > 3 * len(keys.keys) + 3:
                     return None, "перевірка недоступна (429)"
                 continue
+            if model_error(m):  # модель не знайдена / не підтримується: одразу наступна модель
+                return None, f"перевірка недоступна: модель {model}: {m[:100]}".replace("\n", " ")
             errors += 1
             if errors >= 3:
-                return None, f"перевірка недоступна: {type(e).__name__}"
+                return None, f"перевірка недоступна: {type(e).__name__}: {m[:100]}".replace("\n", " ")
             _sleep(3 * errors)

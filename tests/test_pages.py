@@ -1,5 +1,6 @@
 """Кілька сторінок: вибір сторінки для запуску і для натискання кнопки."""
-from gm_bot.main import page_for_click, page_list
+from gm_bot import config
+from gm_bot.main import make_alt, page_for_click, page_list
 
 S = {
     "pages": [
@@ -44,3 +45,19 @@ def test_single_page_without_pages_list():
     one = {"page_id": "9", "auto_page_id": "", "business_file": "c.md", "mode": "draft", "preview": 0, "pages": []}
     ps = page_list(one, {})
     assert len(ps) == 1 and ps[0]["page_id"] == "9" and ps[0]["page_name"] == ""
+
+
+def test_alt_topics_reach_page_and_default_is_empty():
+    s = {**S, "pages": [{**S["pages"][1], "alt_topics": {"words": ["нард"], "business_file": "a.md"}}, S["pages"][0]]}
+    b, a = page_list(s, {})
+    assert b["alt_topics"]["words"] == ["нард"] and a["alt_topics"] == {}
+
+
+def test_make_alt_builds_system_from_alt_business(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "ROOT", tmp_path)
+    (tmp_path / "prompt.md").write_text("PROMPT", "utf-8")
+    (tmp_path / "alt.md").write_text("Сайт: https://nardy.example", "utf-8")
+    alt = make_alt({"prompt_file": "prompt.md", "alt_topics": {"words": ["нард"], "business_file": "alt.md"}})
+    assert alt["words"] == ["нард"] and alt["business"] == "Сайт: https://nardy.example"
+    assert alt["system"].startswith("PROMPT") and alt["system"].endswith("БАЗА:\nСайт: https://nardy.example")
+    assert make_alt({"prompt_file": "prompt.md", "alt_topics": {}}) is None

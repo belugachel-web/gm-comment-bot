@@ -16,6 +16,8 @@ SEP = "\n—— відповідь ——\n"  # формат повідомле�
 def info(c):
     # рядок «Сторінка: …» потрібен кнопкам ✅/❌: за ним вони знаходять потрібну сторінку й токен (не змінювати формат)
     page = f"Сторінка: {c['page']}\n" if c.get("page") else ""
+    if c.get("alt"):
+        page += "🎲 База: GrossMeister (нарди/шахи)\n"
     if c.get("answered"):
         page += "↩️ УЖЕ Є відповідь сторінки (лише тест)\n"
     return f"{page}ID: {c['id']}\nАвтор: {c['author']}\nКоментар: {c['text'][:1000]}\nПосилання: {c['url']}"
@@ -36,9 +38,10 @@ def validate(c, res, business):
 
 
 class Bot:
-    def __init__(self, S, st, src, tg, keys, system, business, ask=None, review=None):
+    def __init__(self, S, st, src, tg, keys, system, business, ask=None, review=None, alt=None):
         self.S, self.st, self.src, self.tg, self.keys = S, st, src, tg, keys
         self.system, self.business = system, business
+        self.alt = alt  # {words, system, business}: допис/коментар про нарди/шахи на мультібрендовій сторінці йде зі своєю базою й контролером
         if hasattr(src, "cache"):
             src.cache = st.pcache  # кеш лічильників коментарів: Facebook читає повністю лише змінені старі пости
         self.ask = ask or gemini.ask_batch
@@ -229,12 +232,15 @@ class Bot:
                 if not S["preview"]:
                     st.done[c["id"]] = "skip"
                 continue
-            topic = off_topic(S.get("skip_topics"), c.get("post"), c["text"])
-            if topic:  # допис/коментар про чужий товар (нарди на сторінці STRYI): бот мовчить, власник бачить одне зведення
-                if not S["preview"]:
-                    st.done[c["id"]] = "skip"
-                    off.append((topic, c))
-                continue
+            if self.alt and off_topic(self.alt["words"], c.get("post"), c["text"]):
+                c["alt"] = True  # нардова тема на мультібрендовій сторінці: відповідь і контролер — за базою GrossMeister
+            else:
+                topic = off_topic(S.get("skip_topics"), c.get("post"), c["text"])
+                if topic:  # допис/коментар про чужий товар: бот мовчить, власник бачить одне зведення
+                    if not S["preview"]:
+                        st.done[c["id"]] = "skip"
+                        off.append((topic, c))
+                    continue
             todo.append(c)
         if off:
             self.tg.send(f"⏭ Пропустив {len(off)} коментарів під чужою темою ({', '.join(sorted({t for t, _ in off}))}). "
@@ -257,20 +263,30 @@ class Bot:
 
     # ---------- генерація ----------
     def generate(self, chunk):
-        res = self.ask(chunk, self.S, self.system, self.keys)
-        bad = [c for c in chunk if res[c["id"]].get("status") == "OK" and validate(c, res[c["id"]], self.business)]
+        """Нардові коментарі (c['alt']) йдуть окремо: зі своєю базою для генерації, перевірки й контролера."""
+        res = {}
+        for alt in (False, True):
+            part = [c for c in chunk if bool(c.get("alt")) == alt]
+            if part:
+                ctx = (self.alt["system"], self.alt["business"]) if alt else (self.system, self.business)
+                res.update(self._generate(part, *ctx))
+        return res
+
+    def _generate(self, chunk, system, business):
+        res = self.ask(chunk, self.S, system, self.keys)
+        bad = [c for c in chunk if res[c["id"]].get("status") == "OK" and validate(c, res[c["id"]], business)]
         if bad:
             print(f"Перевірка не пройдена: перегенерація {len(bad)}")
-            r2 = self.ask(bad, self.S, self.system, self.keys, temp=0.1)
+            r2 = self.ask(bad, self.S, system, self.keys, temp=0.1)
             for c in bad:
                 x = r2[c["id"]]
-                why = validate(c, x, self.business) if x.get("status") == "OK" else None
+                why = validate(c, x, business) if x.get("status") == "OK" else None
                 res[c["id"]] = x if not why else {"status": "UNKNOWN", "reason": f"відповідь ШІ не пройшла перевірку: {why}"}
         if self.review:  # контролер може лише знизити впевненість: сумнів → власнику на ✅/❌
             pairs = [(c, res[c["id"]]["reply"].strip()) for c in chunk
                      if res[c["id"]].get("status") == "OK" and (res[c["id"]].get("reply") or "").strip()]
             if pairs:
-                for i, why in self.review(pairs, self.S, self.business, self.keys).items():
+                for i, why in self.review(pairs, self.S, business, self.keys).items():
                     if why:
                         res[i]["doubt"] = why
         return res
@@ -438,7 +454,7 @@ class Bot:
         q = lambda s: (s or "").replace("\n", " ")
         out = [f"# Перевірка {len(self.pv)} коментарів (нічого не опубліковано)", ""]
         for i, (c, s, reply, note) in enumerate(self.pv, 1):
-            out += [l for l in (f"## {i} · {s} · {c['id']}", f"Сторінка: {c.get('page') or '?'}", f"Допис: {q(c.get('post'))[:150]}", f"Коментар: {q(c['text'])[:300]}",
+            out += [l for l in (f"## {i} · {s} · {c['id']}", f"Сторінка: {c.get('page') or '?'}", "База: GrossMeister (нарди)" if c.get("alt") else "", f"Допис: {q(c.get('post'))[:150]}", f"Коментар: {q(c['text'])[:300]}",
                                 f"Відповідь: {q(reply)}" if reply else "", f"Примітка: {q(note)}" if note else "") if l] + [""]
         (ROOT / "preview.md").write_text("\n".join(out), "utf-8")
         self.tg.send(f"📄 Готово: {len(self.pv)} у preview.md (репо coments-data). Дай його Gemini.", silent=True)

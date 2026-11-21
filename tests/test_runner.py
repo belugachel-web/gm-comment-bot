@@ -52,7 +52,7 @@ def comment(i, text="How much?", age=10):
     return {"post_id": "p", "id": i, "author": "A", "text": text, "post": "post", "url": "u/" + i, "age_min": age}
 
 
-def make(tmp_path, comments=(), ask=None, fail=None, trial_auto=True, review=None, **over):
+def make(tmp_path, comments=(), ask=None, fail=None, trial_auto=True, review=None, alt=None, **over):
     S = {**DEFAULTS, "source": "facebook", "page_id": "P", "auto_page_id": "P", "mode": "auto",
          "gap_sec": [0, 0], "preview": 0, "report": False, **over}
     st = State(tmp_path / "state.json", persist=True)
@@ -62,7 +62,7 @@ def make(tmp_path, comments=(), ask=None, fail=None, trial_auto=True, review=Non
     def default_ask(items, S, system, keys, temp=None):
         return {c["id"]: {"status": "OK", "reply": "See https://grossmeister.com.ua/en/"} for c in items}
 
-    bot = Bot(S, st, src, tg, keys=None, system="", business=BUSINESS, ask=ask or default_ask, review=review)
+    bot = Bot(S, st, src, tg, keys=None, system="", business=BUSINESS, ask=ask or default_ask, review=review, alt=alt)
     bot.clicks_dir = tmp_path / "clicks"  # тести не чіпають справжню папку clicks
     return bot, st, tg, src
 
@@ -334,8 +334,14 @@ def test_doubt_draft_approved_in_next_auto_run(tmp_path):
 def test_review_batch_verdicts():
     out = json.dumps([{"id": "c1", "verdict": "OK", "why": ""}, {"id": "c2", "verdict": "DOUBT", "why": "ціна"}])
     pairs = [(comment("c1"), "r1"), (comment("c2"), "r2"), (comment("c3"), "r3")]
-    r = gemini.review_batch(pairs, {"model": "m"}, "", gemini.Keys("k1"), call=lambda *a: out)
+    seen = []
+
+    def call(k, m, sys_p, prm, t):
+        seen.append((sys_p, prm))
+        return out
+    r = gemini.review_batch(pairs, {"model": "m"}, "", gemini.Keys("k1"), call=call)
     assert r["c1"] is None and r["c2"] == "ціна" and r["c3"]  # пропущений контролером = сумнів
+    assert '"post": "post"' in seen[0][1] and "grossmeister.com.ua" in seen[0][0]
 
 
 def test_review_without_keys_is_doubt():
@@ -496,3 +502,36 @@ def test_off_topic_post_skipped_with_one_notice(tmp_path):
     bot.run()
     assert st.done["c1"] == "skip" and st.done["c2"] == "skip" and src.replies == []
     assert sum("чужою темою" in m["text"] for m in tg.sent) == 1
+
+
+ALT = {"words": ["нард", "chess"], "system": "ALT-SYS", "business": "Сайт: https://nardy.example/en/"}
+
+
+def test_nardy_post_on_multibrand_page_uses_alt_base_and_reviewer(tmp_path):
+    asked, reviewed = [], []
+
+    def ask(items, S, system, keys, temp=None):
+        asked.append((system, [c["id"] for c in items]))
+        url = "https://nardy.example/en/" if system == "ALT-SYS" else "https://grossmeister.com.ua/en/"
+        return {c["id"]: {"status": "OK", "reply": "See " + url} for c in items}
+
+    def review(pairs, S, business, keys):
+        reviewed.append((business, [c["id"] for c, _ in pairs]))
+        return {c["id"]: None for c, _ in pairs}
+    c1 = {**comment("c1"), "post": "Нарди з каменю"}
+    c2 = {**comment("c2", age=20), "post": "Chisel set"}
+    bot, st, tg, src = make(tmp_path, [c1, c2], ask=ask, review=review, alt=ALT)
+    bot.run()
+    assert sorted(src.replies) == [("c1", "See https://nardy.example/en/"), ("c2", "See https://grossmeister.com.ua/en/")]
+    assert ("ALT-SYS", ["c1"]) in asked and ("", ["c2"]) in asked  # нарди — своя база, решта — звичайна
+    assert (ALT["business"], ["c1"]) in reviewed and (BUSINESS, ["c2"]) in reviewed  # контролер теж за своєю базою
+    assert not any("чужою темою" in m["text"] for m in tg.sent)
+
+
+def test_nardy_reply_is_checked_against_alt_base_not_main(tmp_path):
+    def ask(items, S, system, keys, temp=None):  # посилання з нардової бази не повинно проходити для звичайного допису
+        return {c["id"]: {"status": "OK", "reply": "See https://nardy.example/en/"} for c in items}
+    c1 = {**comment("c1"), "post": "Chisel set"}
+    bot, st, tg, src = make(tmp_path, [c1], ask=ask, alt=ALT)
+    bot.run()
+    assert src.replies == [] and st.done["c1"] == "unknown"
