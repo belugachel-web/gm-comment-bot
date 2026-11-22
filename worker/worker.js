@@ -277,6 +277,38 @@ export default {
         await menuCallback(env, cb, chatId);
         return new Response("ok");
       }
+      if (cb.data === "ed") {
+        const originalText = cb.message.text || "";
+        const editText = "✏️ РЕДАГУВАННЯ: Надішліть новий текст відповіді у відповідь (Reply) на це повідомлення.\n\n" + originalText;
+        await Promise.all([
+          tg(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "Надішліть новий текст у відповідь" }),
+          tg(env, "editMessageText", {
+            chat_id: chatId,
+            message_id: cb.message.message_id,
+            text: editText,
+            reply_markup: { inline_keyboard: [[{ text: "❌ Скасувати редагування", callback_data: "canceled" }]] },
+          }),
+        ]);
+        return new Response("ok");
+      }
+      if (cb.data === "canceled") {
+        const originalText = (cb.message.text || "").replace(/^✏️ РЕДАГУВАННЯ: Надішліть новий текст відповіді у відповідь \(Reply\) на це повідомлення\.\n\n/, "");
+        await Promise.all([
+          tg(env, "answerCallbackQuery", { callback_query_id: cb.id, text: "Редагування скасовано" }),
+          tg(env, "editMessageText", {
+            chat_id: chatId,
+            message_id: cb.message.message_id,
+            text: originalText,
+            reply_markup: {
+              inline_keyboard: [
+                [{"text": "✅ Опублікувати", "callback_data": "ok"}, {"text": "❌ Скасувати", "callback_data": "no"}],
+                [{"text": "✏️ Редагувати", "callback_data": "ed"}]
+              ]
+            },
+          }),
+        ]);
+        return new Response("ok");
+      }
       const ok = await dispatch(env, { type: "callback", data: cb.data, cb_id: cb.id, message_id: cb.message.message_id, text: cb.message.text || "" });
       const jobs = [tg(env, "answerCallbackQuery", {
         callback_query_id: cb.id,
@@ -290,6 +322,35 @@ export default {
         }));
       }
       await Promise.all(jobs);
+    } else if (msg?.reply_to_message && msg.text && msg.reply_to_message.text && msg.reply_to_message.text.startsWith("✏️ РЕДАГУВАННЯ:")) {
+      const originalText = msg.reply_to_message.text.replace(/^✏️ РЕДАГУВАННЯ: Надішліть новий текст відповіді у відповідь \(Reply\) на це повідомлення\.\n\n/, "");
+      const newReply = msg.text.trim();
+      let updatedText = originalText;
+      const sep = "\n—— відповідь ——\n";
+      const endSep = "\n——";
+      if (updatedText.includes(sep) && updatedText.includes(endSep)) {
+        const parts = updatedText.split(sep);
+        const header = parts[0];
+        const rest = parts[1].split(endSep)[1] || "";
+        updatedText = header + sep + newReply + endSep + rest;
+      } else {
+        updatedText = updatedText + "\n—— відповідь ——\n" + newReply + "\n——";
+      }
+      await Promise.all([
+        tg(env, "editMessageText", {
+          chat_id: chatId,
+          message_id: msg.reply_to_message.message_id,
+          text: updatedText,
+          reply_markup: {
+            inline_keyboard: [
+              [{"text": "✅ Опублікувати", "callback_data": "ok"}, {"text": "❌ Скасувати", "callback_data": "no"}],
+              [{"text": "✏️ Редагувати", "callback_data": "ed"}]
+            ]
+          },
+        }),
+        tg(env, "deleteMessage", { chat_id: chatId, message_id: msg.message_id }),
+      ]);
+      return new Response("ok");
     } else if (msg?.reply_to_message && msg.text && await customReply(env, msg, chatId)) {
       // це було «своє число» — оброблено
     } else if (msg?.text) {

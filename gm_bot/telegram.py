@@ -29,9 +29,10 @@ class Telegram:
                 {"text": "🤖 Увімкнути авто", "callback_data": "auto_on"},
                 {"text": "📝 Лишити чернетки", "callback_data": "auto_off"}]]}
         elif buttons:
-            p["reply_markup"] = {"inline_keyboard": [[
-                {"text": "✅ Опублікувати", "callback_data": "ok"},
-                {"text": "❌ Скасувати", "callback_data": "no"}]]}
+            p["reply_markup"] = {"inline_keyboard": [
+                [{"text": "✅ Опублікувати", "callback_data": "ok"},
+                 {"text": "❌ Скасувати", "callback_data": "no"}],
+                [{"text": "✏️ Редагувати", "callback_data": "ed"}]]}
         return self._call("sendMessage", **p)  # результат (з message_id) потрібен для прогрес-повідомлення, що редагується
 
     def clicks(self, offset, timeout=0):
