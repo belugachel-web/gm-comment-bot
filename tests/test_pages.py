@@ -1,6 +1,7 @@
 """Кілька сторінок: вибір сторінки для запуску і для натискання кнопки."""
 from gm_bot import config
-from gm_bot.main import make_alt, page_for_click, page_list
+from gm_bot.main import make_alt, manage_reply, page_for_click, page_list
+from gm_bot.state import State
 
 S = {
     "pages": [
@@ -61,3 +62,33 @@ def test_make_alt_builds_system_from_alt_business(tmp_path, monkeypatch):
     assert alt["words"] == ["нард"] and alt["business"] == "Сайт: https://nardy.example"
     assert alt["system"].startswith("PROMPT") and alt["system"].endswith("БАЗА:\nСайт: https://nardy.example")
     assert make_alt({"prompt_file": "prompt.md", "alt_topics": {}}) is None
+
+
+def test_manage_reply_fix_del_and_missing(tmp_path):
+    class FakeTG:
+        def __init__(self): self.sent = []
+        def send(self, text): self.sent.append(text)
+
+    class FakeSrc:
+        def __init__(self, key): self.key, self.edits, self.dels = key, [], []
+        def edit(self, rid, text): self.edits.append((self.key, rid, text))
+        def delete(self, rid): self.dels.append((self.key, rid))
+
+    ps = page_list(S, {})
+    st = State(tmp_path / "state.json", persist=True)
+    st.done["c1"] = "replied"
+    st.log_reply({"id": "c1", "page": "STRYI", "text": "Ціна?"}, "Старий текст", "rid-1")
+    tg = FakeTG()
+    srcs = {"stryi": FakeSrc("stryi"), "nardy": FakeSrc("nardy")}
+    mk = lambda _S, P, _env: (srcs[P["page_key"]], "", "")
+
+    assert manage_reply({"type": "fix", "cid": "missing", "text": "x"}, ps, st, tg, {}, S, make_src=mk) is False
+    assert "Не знайдено" in tg.sent[-1]
+
+    assert manage_reply({"type": "fix", "cid": "c1", "text": "Новий текст"}, ps, st, tg, {}, S, make_src=mk) is True
+    assert srcs["stryi"].edits == [("stryi", "rid-1", "Новий текст")]
+    assert st.replies[0]["reply"] == "Новий текст"
+
+    assert manage_reply({"type": "del", "cid": "c1"}, ps, st, tg, {}, S, make_src=mk) is True
+    assert srcs["stryi"].dels == [("stryi", "rid-1")]
+    assert st.done["c1"] == "rejected" and "c1" not in st.rids and st.replies == []

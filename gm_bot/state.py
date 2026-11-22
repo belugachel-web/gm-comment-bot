@@ -17,11 +17,14 @@ class State:
         self.replies = d.get("replies", [])  # останні відправлені відповіді (для replies.md)
         self.pcache = d.get("pcache", {})    # id посту -> кількість коментарів на момент останнього повного читання (швидке читання)
         self.rids = d.get("rids", {})        # id коментаря -> id нашої опублікованої відповіді (для виправлення/видалення)
+        self.rpages = d.get("rpages", {})    # id коментаря -> назва сторінки (щоб /fix і /del брали правильний токен)
 
     def log_reply(self, c, reply, rid=""):
         """Запам'ятати відправлену відповідь: показується у replies.md (новіші зверху, останні 300)."""
         if rid:
             self.rids[c["id"]] = rid
+            if c.get("page"):
+                self.rpages[c["id"]] = c["page"]
         self.replies.insert(0, {"t": time.time(), "page": c.get("page", ""), "author": c.get("author", ""), "cid": c.get("id", ""), "rid": rid,
                                 "comment": c.get("text", "")[:500], "reply": reply, "url": c.get("url", "")})
         del self.replies[300:]
@@ -48,7 +51,8 @@ class State:
         if not self.persist:
             return
         data = {"done": self.done, "offset": self.offset, "alerts": self.alerts,
-                "tries": self.tries, "daily": self.daily, "trial": self.trial, "replies": self.replies, "pcache": self.pcache, "rids": self.rids}
+                "tries": self.tries, "daily": self.daily, "trial": self.trial, "replies": self.replies,
+                "pcache": self.pcache, "rids": self.rids, "rpages": self.rpages}
         self.path.write_text(json.dumps(data, ensure_ascii=False, indent=1), "utf-8")
         self.path.with_name("replies.md").write_text(self._render_replies(), "utf-8")
 

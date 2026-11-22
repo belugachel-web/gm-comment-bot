@@ -535,3 +535,11 @@ def test_nardy_reply_is_checked_against_alt_base_not_main(tmp_path):
     bot, st, tg, src = make(tmp_path, [c1], ask=ask, alt=ALT)
     bot.run()
     assert src.replies == [] and st.done["c1"] == "unknown"
+
+
+def test_saved_clicks_preserve_rid_and_page(tmp_path):
+    bot, st, tg, src = make(tmp_path, mode="draft", page_name="STRYI")
+    bot.click_event(event("c1", "Hello"))
+    bot2, st2, tg2, src2 = make(tmp_path, mode="draft", page_name="STRYI")
+    bot2.run()
+    assert st2.rids["c1"] == "r-c1" and st2.rpages["c1"] == "STRYI"

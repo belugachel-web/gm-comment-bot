@@ -150,8 +150,9 @@ class Bot:
                     dup = bool(chk and chk(cid))  # подвійний тап: Facebook вже має відповідь сторінки
                 except FBError:
                     pass  # не змогли перевірити — пробуємо надіслати як раніше
+                rid = ""
                 if not dup:
-                    self.src.reply(cid, rep)
+                    rid = self.src.reply(cid, rep) or ""
             except FBError as e:
                 self.alert_fb(e)
                 ans(cq["id"], "Помилка Facebook")
@@ -159,8 +160,15 @@ class Bot:
                 self._restore(msg, txt)  # повертаємо кнопки, щоб можна було натиснути ще раз
                 return
             self.st.done[cid] = "replied"
+            rid_str = rid if isinstance(rid, str) else ""
+            pname = self.S.get("page_name", "")
+            if rid_str:
+                self.st.rids[cid] = rid_str
+                if pname:
+                    self.st.rpages[cid] = pname
             note = "✅ НАДІСЛАНО на Facebook"
-            out = {"cid": cid, "done": "replied", "trial": "ok" if self.trial_mode else None}
+            out = {"cid": cid, "done": "replied", "rid": rid_str, "page": pname,
+                   "trial": "ok" if self.trial_mode else None}
             if self.trial_mode:
                 self.st.trial["ok"] += 1
         else:
@@ -207,6 +215,10 @@ class Bot:
                     self.st.trial.update(ok=0, no=0, asked=False)
             if r.get("cid") and r.get("done"):
                 self.st.done[r["cid"]] = r["done"]
+                if r.get("rid"):
+                    self.st.rids[r["cid"]] = r["rid"]
+                    if r.get("page"):
+                        self.st.rpages[r["cid"]] = r["page"]
                 if r.get("trial") in ("ok", "no"):
                     self.st.trial[r["trial"]] += 1
             f.unlink()

@@ -293,9 +293,27 @@ export default {
     } else if (msg?.reply_to_message && msg.text && await customReply(env, msg, chatId)) {
       // це було «своє число» — оброблено
     } else if (msg?.text) {
-      const cmd = msg.text.trim().split(/[ @]/)[0];
+      const txt = msg.text.trim();
+      const cmd = txt.split(/[ @\s]/)[0];
       if (["/run", "/menu", "/start"].includes(cmd)) await showMenu(env, chatId);
       else if (cmd === "/stop") await showStopConfirm(env, chatId);
+      else if (cmd === "/fix") {
+        const m = /^\/fix(?:@\S+)?\s+(\S+)\s+([\s\S]+)$/.exec(txt);
+        if (!m) {
+          await tg(env, "sendMessage", { chat_id: chatId, text: "Формат: /fix <ID коментаря> <новий текст>" });
+        } else {
+          const ok = await dispatch(env, { type: "fix", cid: m[1], text: m[2].trim() });
+          await tg(env, "sendMessage", { chat_id: chatId, text: ok ? `⏳ Виправляю відповідь для ${m[1]}…` : "❌ Не вдалося запустити виправлення" });
+        }
+      } else if (cmd === "/del") {
+        const m = /^\/del(?:@\S+)?\s+(\S+)\s*$/.exec(txt);
+        if (!m) {
+          await tg(env, "sendMessage", { chat_id: chatId, text: "Формат: /del <ID коментаря>" });
+        } else {
+          const ok = await dispatch(env, { type: "del", cid: m[1] });
+          await tg(env, "sendMessage", { chat_id: chatId, text: ok ? `⏳ Видаляю відповідь для ${m[1]}…` : "❌ Не вдалося запустити видалення" });
+        }
+      }
     }
     return new Response("ok");
   },

@@ -11,7 +11,7 @@ import sys
 import traceback
 
 from . import config
-from .facebook import Facebook, Mock
+from .facebook import FBError, Facebook, Mock
 from . import gemini
 from .gemini import Keys
 from .runner import Bot
@@ -102,6 +102,52 @@ def make_source(S, P, env):
     return Mock(), system, business
 
 
+def manage_reply(ev, pages, st, tg, env, S, make_src=make_source):
+    """Команди /fix <cid> <текст> і /del <cid> з Telegram: редагує або видаляє опубліковану відповідь."""
+    kind = ev.get("type")
+    cid = str(ev.get("cid") or "").strip()
+    if not cid:
+        tg.send("❌ Вкажіть ID коментаря.")
+        return False
+    rid = st.rids.get(cid)
+    if not rid:
+        tg.send(f"❌ Не знайдено ID нашої відповіді для {cid} (можливо, відповіли вручну або до оновлення).")
+        return False
+    pname = st.rpages.get(cid) or next((r.get("page") for r in st.replies if r.get("cid") == cid and r.get("page")), "")
+    candidates = [P for P in pages if pname and P["page_name"].lower() == pname.lower()] or pages
+    made = next((m for P in candidates if (m := make_src(S, P, env)) is not None), None)
+    if not made:
+        tg.send(f"⚠️ Немає токена сторінки для {cid}.")
+        return False
+    src, _, _ = made
+    try:
+        if kind == "fix":
+            text = (ev.get("text") or "").strip()
+            if not text:
+                tg.send("❌ Формат: /fix <ID коментаря> <новий текст>")
+                return False
+            src.edit(rid, text)
+            for r in st.replies:
+                if r.get("cid") == cid:
+                    r["reply"] = text
+            st.save()
+            tg.send(f"✏️ Відповідь для {cid} оновлено на Facebook.")
+            return True
+        if kind == "del":
+            src.delete(rid)
+            st.rids.pop(cid, None)
+            st.rpages.pop(cid, None)
+            st.done[cid] = "rejected"
+            st.replies = [r for r in st.replies if r.get("cid") != cid]
+            st.save()
+            tg.send(f"🗑 Відповідь для {cid} видалено з Facebook.")
+            return True
+    except FBError as e:
+        tg.send(f"⚠️ Не вдалося {'оновити' if kind == 'fix' else 'видалити'} відповідь для {cid}: {e.msg}")
+        return False
+    return False
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     env = os.environ
@@ -137,6 +183,9 @@ def main(argv=None):
                 raise RuntimeError(f"Немає секрету {P['token_env']} для сторінки {P['page_name'] or P['page_key']}.")
             src, system, business = made
             Bot(P, st, src, tg, keys, system, business).click_event(ev)
+        elif ev.get("type") in ("fix", "del"):
+            Bot(pages[0], st, None, tg, keys, "", "").ingest_clicks()
+            manage_reply(ev, pages, st, tg, env, S)
         else:
             bots = []
             try:
