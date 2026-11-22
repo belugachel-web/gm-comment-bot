@@ -543,3 +543,10 @@ def test_saved_clicks_preserve_rid_and_page(tmp_path):
     bot2, st2, tg2, src2 = make(tmp_path, mode="draft", page_name="STRYI")
     bot2.run()
     assert st2.rids["c1"] == "r-c1" and st2.rpages["c1"] == "STRYI"
+
+
+def test_preview_mock_fallback_tags_alt_topics(tmp_path):
+    alt = {**ALT, "words": ["нард", "chess", "backgammon", "grossmeister"]}
+    bot, st, tg, src = make(tmp_path, [], preview=16, mode="draft", alt=alt)
+    picked = bot.pick([])
+    assert len(picked) == 16 and all(c.get("alt") for c in picked)

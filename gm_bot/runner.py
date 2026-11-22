@@ -267,7 +267,8 @@ class Bot:
             return todo[:cap]
         if len(todo) < n and S["source"] != "mock":  # справжніх коментарів мало: добираємо приклади
             extra = [{"id": "mock-" + m["id"], "author": m["author"], "text": m["text"], "post": m["post"],
-                      "url": "(тестовий приклад, не з Facebook)", "age_min": m["age_min"]}
+                      "url": "(тестовий приклад, не з Facebook)", "age_min": m["age_min"],
+                      **({"alt": True} if self.alt and off_topic(self.alt["words"], m.get("post"), m["text"]) else {})}
                      for m in json.loads((ROOT / "mock_comments.json").read_text("utf-8"))]
             random.shuffle(extra)
             todo += extra[:n - len(todo)]

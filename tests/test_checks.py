@@ -41,6 +41,8 @@ def test_phones():
     assert reply_safe("Телефонуйте 073 723 44 55", BUSINESS) is None
     assert reply_safe("Viber +380 73 267-00-70", BUSINESS) is None
     assert reply_safe("Телефонуйте 099 111 22 33", BUSINESS)
+    assert reply_safe("Позвоните +380****2334", BUSINESS)
+    assert reply_safe("Телефон: 073-***-44-55", BUSINESS)
 
 
 def test_tidy_strips_tail_after_last_link():
@@ -60,6 +62,9 @@ def test_style_blocks_hashtags_mentions_markdown_but_not_email():
     assert reply_style("x" * 701)
     assert reply_style("Write orders@stryi.ua") is None
     assert reply_style("Thank you, see you soon") is None
+    assert reply_style("Сайт https://stryi.ua та ще раз https://stryi.ua")
+    assert reply_style("Сайт https://stryi.ua і https://woodcarving-tools.com")
+    assert reply_style("Telegram t.me/Stryi_ua або сайт https://stryi.ua") is None
 
 
 def test_market_cyrillic_comment_gets_no_foreign_link():

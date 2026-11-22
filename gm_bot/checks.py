@@ -46,6 +46,7 @@ URL_RE = re.compile(
     r"|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|ua|net|org|pl|de|me|io|ru|info|eu)\b(?:/" + _TAIL + ")?",
     re.I)
 PHONE_RE = re.compile(r"\+?\d[\d ().-]{7,}\d")
+MASKED_PHONE_RE = re.compile(r"(?:\+?\d[\d\s().-]{0,6}[*•xX]{2,}|\*{3,}\d{2,})")
 PRICE_RE = re.compile(
     r"\d[\d\s.,]*\s*(?:грн|гривн\w*|uah|usd|eur|pln|zł|zl|€|\$|£|₴|dollars?|euros?|долар\w*|доллар\w*|євро|злот\w*|złot\w*)"
     r"(?![A-Za-zА-Яа-яІіЇїЄєҐґ])|[$€£₴]\s*\d", re.I)
@@ -85,6 +86,10 @@ def reply_style(reply):
         return "розмітка Markdown або список"
     if re.search(r"[{}\[\]]|\bnull\b|\bNone\b", reply):
         return "службові символи у відповіді"
+    urls = [_norm_url(u) for u in URL_RE.findall(reply)]
+    web_urls = [u for u in urls if not u.startswith("t.me/")]
+    if len(urls) != len(set(urls)) or len(web_urls) > 1:
+        return "повтор посилання у відповіді"
     return None
 
 
@@ -141,6 +146,8 @@ def reply_safe(reply, business):
     for u in URL_RE.findall(reply):
         if _norm_url(u) not in ok_urls:
             return f"посилання не з бази: {u[:60]}"
+    if MASKED_PHONE_RE.search(reply):
+        return "замаскований телефон у відповіді"
     ok_phones = {_digits(p)[-9:] for p in PHONE_RE.findall(business)}
     for p in PHONE_RE.findall(reply):
         if _digits(p)[-9:] not in ok_phones:

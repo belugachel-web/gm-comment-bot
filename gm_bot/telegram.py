@@ -47,9 +47,10 @@ class Telegram:
         self._call("editMessageText", chat_id=chat_id, message_id=message_id, text=text[:4000])
 
     def restore(self, chat_id, message_id, text):
-        """Повернути текст чернетки і кнопки ✅/❌ (якщо обробка натискання не вдалася)."""
+        """Повернути текст чернетки і кнопки ✅/❌/✏️ (якщо обробка натискання не вдалася)."""
         self._call("editMessageText", chat_id=chat_id, message_id=message_id, text=text[:4000],
                    disable_web_page_preview=True,
-                   reply_markup={"inline_keyboard": [[
-                       {"text": "✅ Опублікувати", "callback_data": "ok"},
-                       {"text": "❌ Скасувати", "callback_data": "no"}]]})
+                   reply_markup={"inline_keyboard": [
+                       [{"text": "✅ Опублікувати", "callback_data": "ok"},
+                        {"text": "❌ Скасувати", "callback_data": "no"}],
+                       [{"text": "✏️ Редагувати", "callback_data": "ed"}]]})
