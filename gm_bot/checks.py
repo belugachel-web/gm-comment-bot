@@ -120,13 +120,16 @@ def mentions_foreign_country(comment):
     return bool(FOREIGN_COUNTRY.search(comment))
 
 
+NON_UKRAINIAN_CYR = re.compile(r"[ЈјЋћЂђЉљЊњЏџЅѕЪъЭэЫыЁё]")
+
+
 def reply_market(comment, reply, allowed=()):
     """Кириличний (укр/рос) коментар → посилання українського сайту, а не міжнародного/іншомовного,
-    ХІБА що в коментарі названа інша країна (країна перебиває мову).
+    ХІБА що в коментарі названа інша країна (країна перебиває мову) або це небезпечно інша кирилиця (сербська/болгарська тощо).
     Посилання, яке власник вказав у дописі (allowed), дозволене завжди."""
     if len(CYR.findall(comment)) <= len(LAT.findall(comment)):
         return None
-    if mentions_foreign_country(comment):
+    if mentions_foreign_country(comment) or NON_UKRAINIAN_CYR.search(comment) or NON_UKRAINIAN_CYR.search(reply):
         return None
     ok = {_norm_url(u) for u in allowed}
     for u in URL_RE.findall(reply):

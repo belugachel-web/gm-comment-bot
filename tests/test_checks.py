@@ -80,6 +80,8 @@ def test_market_foreign_country_overrides_language():
     assert reply_market("Я з Марокко, можна замовити?", "Відправляємо по світу https://woodcarving-tools.com") is None
     assert reply_market("Из Германии можно заказать?", "Отправляем по миру https://woodcarving-tools.com") is None
     assert reply_market("Доставляєте в Польщу?", "Так https://woodcarving-tools.com") is None
+    # сербська/болгарська кирилиця (не укр) → міжнародний сайт дозволений
+    assert reply_market("ДАЈ ТЕ МИ САВЕТ КАКО ДА КУПИМ ХВАЛА", "Можете наручити на https://woodcarving-tools.com") is None
     # без згадки іншої країни — блокуємо, як раніше
     assert reply_market("Скільки коштує, англійська версія є?", "Сайт https://woodcarving-tools.com")
     assert reply_market("Доставка по Україні?", "Сайт https://woodcarving-tools.com")
