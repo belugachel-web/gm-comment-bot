@@ -48,6 +48,19 @@ class Facebook:
         self.read = self.seen = 0
 
     def _check(self, r):
+        for hdr in ("x-business-use-case-usage", "x-page-usage"):
+            raw = r.headers.get(hdr)
+            if raw:
+                try:
+                    u = json.loads(raw)
+                    vals = [v for sub in (u.values() if isinstance(u, dict) else [])
+                            for item in (sub if isinstance(sub, list) else [sub])
+                            for k, v in (item.items() if isinstance(item, dict) else [])
+                            if isinstance(v, (int, float)) and k in ("call_count", "total_cputime", "total_time")]
+                    if vals and max(vals) >= 75:
+                        print(f"Facebook {hdr}: навантаження {max(vals)}%")
+                except Exception:
+                    pass
         if r.status_code == 200:
             return r.json()
         try:

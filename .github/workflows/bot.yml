@@ -15,7 +15,7 @@ on:
       preview:
         description: "Перегляд: бот лише ПОКАЗУЄ N відповідей у Telegram, нічого не публікує"
         type: choice
-        options: [без перегляду, "10", "50"]
+        options: [без перегляду, "10", "50", "200", "500"]
         default: без перегляду
       age:
         description: "Наскільки старі коментарі брати (в днях)"
@@ -42,6 +42,6 @@ jobs:
     with:
       page: ${{ (inputs.page == 'nardy' || inputs.page == 'stryi') && inputs.page || '' }}
       mode: ${{ inputs.mode }}
-      preview: ${{ (inputs.preview == '10' || inputs.preview == '50') && inputs.preview || '' }}
+      preview: ${{ (inputs.preview == '10' || inputs.preview == '50' || inputs.preview == '200' || inputs.preview == '500') && inputs.preview || '' }}
       age: ${{ (inputs.age == 'усі' && 'all') || ((inputs.age == '7' || inputs.age == '30' || inputs.age == '365') && inputs.age) || '' }}
       limit: ${{ inputs.limit }}

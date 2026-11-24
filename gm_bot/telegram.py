@@ -1,4 +1,6 @@
 """Telegram: сповіщення, чернетки з кнопками ✅/❌, збір натискань."""
+import time
+
 import httpx
 
 
@@ -10,16 +12,21 @@ class Telegram:
         if not self.token:
             print(f"[TG:{method}] (немає токена Telegram)")
             return None
-        try:
-            r = httpx.post(f"https://api.telegram.org/bot{self.token}/{method}", json=p, timeout=http_timeout)
-            data = r.json()
-        except Exception as e:
-            print(f"Telegram {method}: {type(e).__name__}")
-            return None
-        if not data.get("ok"):
+        for attempt in range(3):
+            try:
+                r = httpx.post(f"https://api.telegram.org/bot{self.token}/{method}", json=p, timeout=http_timeout)
+                data = r.json()
+            except Exception as e:
+                print(f"Telegram {method}: {type(e).__name__}")
+                return None
+            if data.get("ok"):
+                return data.get("result")
+            wait = (data.get("parameters") or {}).get("retry_after")
+            if data.get("error_code") == 429 and wait and attempt < 2:
+                time.sleep(min(int(wait) + 1, 60))
+                continue
             print(f"Telegram {method}: {data.get('description')}")
             return None
-        return data.get("result")
 
     def send(self, text, buttons=False, silent=False):
         p = {"chat_id": self.chat_id, "text": text[:4000], "disable_web_page_preview": True,

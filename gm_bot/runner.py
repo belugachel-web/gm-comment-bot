@@ -465,12 +465,17 @@ class Bot:
         if not self.pv:
             return
         q = lambda s: (s or "").replace("\n", " ")
-        out = [f"# Перевірка {len(self.pv)} коментарів (нічого не опубліковано)", ""]
+        ok_clean = sum(1 for _, s, _, note in self.pv if s == "OK" and not note)
+        ok_doubt = sum(1 for _, s, _, note in self.pv if s == "OK" and note)
+        unk = sum(1 for _, s, _, _ in self.pv if s == "UNKNOWN")
+        skp = sum(1 for _, s, _, _ in self.pv if s == "SKIP")
+        out = [f"# Перевірка {len(self.pv)} коментарів (нічого не опубліковано)",
+               f"Підсумок: OK чистих={ok_clean} · OK з приміткою/сумнівом={ok_doubt} · UNKNOWN={unk} · SKIP={skp}", ""]
         for i, (c, s, reply, note) in enumerate(self.pv, 1):
             out += [l for l in (f"## {i} · {s} · {c['id']}", f"Сторінка: {c.get('page') or '?'}", "База: GrossMeister (нарди)" if c.get("alt") else "", f"Допис: {q(c.get('post'))[:150]}", f"Коментар: {q(c['text'])[:300]}",
                                 f"Відповідь: {q(reply)}" if reply else "", f"Примітка: {q(note)}" if note else "") if l] + [""]
         (ROOT / "preview.md").write_text("\n".join(out), "utf-8")
-        self.tg.send(f"📄 Готово: {len(self.pv)} у preview.md (репо coments-data). Дай його Gemini.", silent=True)
+        self.tg.send(f"📄 Готово: {len(self.pv)} у preview.md (OK={ok_clean}, сумнів={ok_doubt}, ❓={unk}, ⏭={skp}).", silent=True)
 
     def processed(self):
         """Скільки коментарів закрито цим запуском (збій ШІ «повторю» не рахується)."""
