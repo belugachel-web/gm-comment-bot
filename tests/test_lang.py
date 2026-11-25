@@ -14,3 +14,10 @@ def test_ukrainian_comment_russian_reply_rejected():
 def test_ambiguous_cyrillic_comment_accepts_either_language():
     assert reply_ok("Цена?", "Дякуємо! Ціни на сайті")
     assert reply_ok("Цена?", "Спасибо! Цены на сайте")
+
+
+def test_translit_and_pasted_header_allow_cyrillic_reply():
+    assert reply_ok("kak mojno kupit", "Оформить заказ можно на нашем сайте")
+    assert reply_ok("Molodets", "Большое спасибо!")
+    assert reply_ok("Професійні стамески і різці по дереву STRYI Как Магу Купит В Город Тбилиси",
+                    "Оформить заказ можно на нашем сайте")

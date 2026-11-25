@@ -6,6 +6,12 @@ ARB = re.compile(r"[\u0600-\u06FF]")
 LAT = re.compile(r"[A-Za-z\u00C0-\u017F]")
 
 
+_TRANSLIT_CYR = re.compile(
+    r"\b(?:kak|skolko|skolka|kupit|mojno|mozhno|stoit|molodets|spasibo|tsena|zdrastv\w*|privet|"
+    r"skilky|skilki|dyakuy\w*|otpravk\w*|dostavk\w*|magu)\b", re.I)
+_RU_WORDS = re.compile(r"\b(?:как|могу|купить|купит|сколько|стоит|цена|город|доставка|отправка|заказать)\b", re.I)
+
+
 def reply_ok(comment, reply):
     """Відповідь тим самим алфавітом, що й коментар, без змішаних літер у словах."""
     def cnt(t):
@@ -14,13 +20,15 @@ def reply_ok(comment, reply):
     if not any(c.values()):
         return True  # лише смайли
     main = max(c, key=c.get)
+    if main == "lat" and r["cyr"] > 0 and _TRANSLIT_CYR.search(comment):
+        main = "cyr"  # трансліт ru/uk латиницею («kak mojno kupit», «Molodets») → відповідь кирилицею дозволена
     if r[main] == 0:
         return False
     ru_only, uk_only = re.compile("[ыэъёЫЭЪЁ]"), re.compile("[іїєґІЇЄҐ]")  # рос. коментар → укр. відповідь і навпаки (алфавіт той самий)
     if main == "cyr":
         cc = comment
         if (ru_only.search(cc) and not uk_only.search(cc) and uk_only.search(reply)) or \
-                (uk_only.search(cc) and not ru_only.search(cc) and ru_only.search(reply)):
+                (uk_only.search(cc) and not ru_only.search(cc) and not _RU_WORDS.search(cc) and ru_only.search(reply)):
             return False
     if any(k != main and r[k] > 0 for k in ("cyr", "arb")):
         return False
@@ -86,6 +94,8 @@ def reply_style(reply):
         return "розмітка Markdown або список"
     if re.search(r"[{}\[\]]|\bnull\b|\bNone\b", reply):
         return "службові символи у відповіді"
+    if re.search(r"(?:дякуємо|спасиб[оі])\s+ви\b", reply, re.I):
+        return "граматична помилка (дякуємо Ви)"
     urls = [_norm_url(u) for u in URL_RE.findall(reply)]
     web_urls = [u for u in urls if not u.startswith("t.me/")]
     if len(urls) != len(set(urls)) or len(web_urls) > 1:
@@ -104,16 +114,17 @@ _COUNTRIES = (
     r"словаччин|словаки|румуні|румыни|болгарі|болгари|угорщин|венгри|австрі[їяю]|австри[июя]|швейцар|нідерланд|голланд|бельгі[їяю]|бельги[июя]|"
     r"ірланд|швеці[їяю]|швеци[июя]|норвег|фінлянд|финлянд|португал|греці[їяю]|греци[июя]|австрал|японі[їяю]|япони[июя]|китай|бразил|мексик|"
     r"єгипет|египет|алжир|туніс|тунис|сауд|катар|дубай|дубаї|аргентин|чилі|колумб|нігері|нигери|кені|кени|"
+    r"азербайджан|тбілісі|тбилиси|баку|єреван|ереван|еквадор|"
     # англ
     r"morocco|germany|poland|usa(?!\w)|u\.s\.a?\.?|united states|america|uae(?!\w)|emirates|dubai|canada|england|\buk\b|britain|united kingdom|france|italy|spain|turkey|türkiye|"
     r"israel|australia|japan|china|korea|brazil|mexico|egypt|algeria|tunisia|saudi|qatar|kuwait|india|pakistan|netherlands|belgium|ireland|sweden|norway|finland|denmark|"
     r"portugal|greece|austria|switzerland|czech|slovakia|romania|bulgaria|hungary|lithuania|latvia|estonia|moldova|kazakhstan|nigeria|kenya|south africa|philippines|"
-    r"indonesia|malaysia|thailand|vietnam|singapore|new zealand|argentina|chile|colombia|peru|cuba|"
+    r"indonesia|malaysia|thailand|vietnam|singapore|new zealand|argentina|chile|colombia|peru|cuba|azerbaijan|georgia|tbilisi|baku|ecuador|"
     # інші мови
     r"marruecos|alemania|polonia|estados unidos|españa|francia|italia|turquía|méxico|maroko|niemcy|polsk|marokko|deutschland|maroc|allemagne|"
     r"المغرب|مصر|السعودية|الإمارات|الجزائر|تونس|قطر|الكويت|الأردن|لبنان|العراق|ليبيا"
 )
-FOREIGN_COUNTRY = re.compile(r"(?<!\w)(?:" + _COUNTRIES + r")", re.I)
+FOREIGN_COUNTRY = re.compile(r"(?<!\w)(?:[ув](?=[А-ЯІЇЄҐ]))?(?:" + _COUNTRIES + r")", re.I)
 
 
 def mentions_foreign_country(comment):

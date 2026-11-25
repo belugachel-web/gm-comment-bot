@@ -65,6 +65,8 @@ def test_style_blocks_hashtags_mentions_markdown_but_not_email():
     assert reply_style("Сайт https://stryi.ua та ще раз https://stryi.ua")
     assert reply_style("Сайт https://stryi.ua і https://woodcarving-tools.com")
     assert reply_style("Telegram t.me/Stryi_ua або сайт https://stryi.ua") is None
+    assert reply_style("Щиро дякуємо Ви за теплі слова!")
+    assert reply_style("Щиро дякуємо Вам за теплі слова!") is None
 
 
 def test_market_cyrillic_comment_gets_no_foreign_link():
@@ -90,6 +92,8 @@ def test_market_foreign_country_overrides_language():
 def test_mentions_foreign_country():
     assert mentions_foreign_country("I am from Morocco, can I order?")
     assert mentions_foreign_country("Доставка в Німеччину є?")
+    assert mentions_foreign_country("Чи є можливість відправити уКанаду!!")
+    assert mentions_foreign_country("Как купить в Город Тбилиси")
     assert mentions_foreign_country("هل توصلون إلى المغرب؟")
     assert not mentions_foreign_country("Працює англійською? Німецька сталь?")
     assert not mentions_foreign_country("Доставка по Україні, Львів?")
